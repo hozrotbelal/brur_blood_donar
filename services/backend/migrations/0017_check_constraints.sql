@@ -1,0 +1,44 @@
+-- Check constraints (from sample DDL, document 04 section 14, and rules in section 7.2)
+-- Generated from BBDA-ERD data dictionary (document 04, section 5); see docs/decisions/database-assumptions.md
+
+ALTER TABLE idn.app_user ADD CONSTRAINT ck_app_user_1 CHECK (phone_e164 ~ '^\+[1-9][0-9]{7,14}$');
+ALTER TABLE idn.donor_profile ADD CONSTRAINT ck_donor_profile_1 CHECK (travel_radius_km BETWEEN 1 AND 100);
+ALTER TABLE idn.donor_profile ADD CONSTRAINT ck_donor_profile_2 CHECK (blood_group_status = 'Self-declared' OR blood_group_verified_at IS NOT NULL);
+ALTER TABLE req.blood_request ADD CONSTRAINT ck_blood_request_1 CHECK (reference_no ~ '^REQ-[0-9]{4}-[0-9]{6}$');
+ALTER TABLE req.blood_request ADD CONSTRAINT ck_blood_request_2 CHECK (quantity_units BETWEEN 1 AND 20);
+ALTER TABLE req.blood_request ADD CONSTRAINT ck_blood_request_3 CHECK (NOT outreach_paused OR outreach_paused_reason IS NOT NULL);
+ALTER TABLE req.blood_request ADD CONSTRAINT ck_blood_request_4 CHECK (deleted_at IS NULL OR status = 'Draft');
+ALTER TABLE src.invitation ADD CONSTRAINT ck_invitation_1 CHECK (reask_count <= 1);
+ALTER TABLE src.invitation ADD CONSTRAINT ck_invitation_2 CHECK (status <> 'Responded' OR response IS NOT NULL);
+ALTER TABLE crd.coordination_case ADD CONSTRAINT ck_coordination_case_1 CHECK (case_no ~ '^CASE-[0-9]{4}-[0-9]{6}$');
+ALTER TABLE crd.outcome_update ADD CONSTRAINT ck_outcome_update_1 CHECK ((confidence = 'Service-confirmed') = (source_type IN ('COLLECTION_SERVICE_CONFIRMATION','HOSPITAL_CONFIRMATION','PARTNER_INTEGRATION')));
+ALTER TABLE crd.outcome_update ADD CONSTRAINT ck_outcome_update_2 CHECK (channel <> 'PHONE' OR (reported_by_name IS NOT NULL AND recorded_by IS NOT NULL));
+ALTER TABLE aud.audit_event ADD CONSTRAINT ck_audit_event_1 CHECK (result <> 'SUCCESS' OR reason_code IS NOT NULL OR category NOT IN ('SENSITIVE_READ','EXPORT','PERMISSION','APPROVAL'));
+ALTER TABLE idn.credential ADD CONSTRAINT ck_credential_1 CHECK (failed_attempts >= 0);
+ALTER TABLE idn.account_recovery_request ADD CONSTRAINT ck_account_recovery_request_1 CHECK (reference_no ~ '^REC-[0-9]{4}-[0-9]{6}$');
+ALTER TABLE idn.account_recovery_request ADD CONSTRAINT ck_account_recovery_request_2 CHECK (new_phone ~ '^\+[1-9][0-9]{7,14}$');
+ALTER TABLE idn.account_recovery_request ADD CONSTRAINT ck_account_recovery_request_3 CHECK (status NOT IN ('Approved','Cooling off','Completed') OR approver_id IS NOT NULL);
+ALTER TABLE idn.account_recovery_request ADD CONSTRAINT ck_account_recovery_request_4 CHECK (status <> 'Cooling off' OR cooling_off_until IS NOT NULL);
+ALTER TABLE idn.account_recovery_request ADD CONSTRAINT ck_account_recovery_request_5 CHECK (status NOT IN ('Approved','Rejected','Cancelled') OR reason IS NOT NULL);
+ALTER TABLE aud.status_history ADD CONSTRAINT ck_status_history_1 CHECK (from_status IS DISTINCT FROM to_status);
+ALTER TABLE aud.status_history ADD CONSTRAINT ck_status_history_2 CHECK ((actor_role = 'SYSTEM') = (actor_user_id IS NULL));
+ALTER TABLE idn.login_event ADD CONSTRAINT ck_login_event_1 CHECK (location IS NULL OR location_source = 'DEVICE');
+ALTER TABLE idn.login_event ADD CONSTRAINT ck_login_event_2 CHECK (session_id IS NULL OR result = 'SUCCESS');
+ALTER TABLE idn.donor_location ADD CONSTRAINT ck_donor_location_1 CHECK (grid_size_m BETWEEN 500 AND 5000);
+ALTER TABLE idn.donor_location ADD CONSTRAINT ck_donor_location_2 CHECK (source <> 'SUPPORT_CALL' OR (recorded_by IS NOT NULL AND call_reference IS NOT NULL));
+ALTER TABLE idn.donor_location ADD CONSTRAINT ck_donor_location_3 CHECK (status <> 'Approved' OR (validated_at IS NOT NULL AND approved_at IS NOT NULL AND (confirmed_by_donor_at IS NOT NULL OR (approved_by IS NOT NULL AND call_reference IS NOT NULL))));
+ALTER TABLE idn.donor_location ADD CONSTRAINT ck_donor_location_4 CHECK (status <> 'Rejected' OR rejection_reason IS NOT NULL);
+ALTER TABLE idn.sensitive_access_grant ADD CONSTRAINT ck_sensitive_access_grant_1 CHECK (grantee_role IN ('SUP','ADM'));
+ALTER TABLE idn.sensitive_access_grant ADD CONSTRAINT ck_sensitive_access_grant_2 CHECK (scope_used <> 'Own');
+ALTER TABLE idn.sensitive_access_grant ADD CONSTRAINT ck_sensitive_access_grant_3 CHECK (expires_at > granted_at);
+ALTER TABLE idn.sensitive_access_grant ADD CONSTRAINT ck_sensitive_access_grant_4 CHECK (grantee_user_id <> subject_user_id);
+ALTER TABLE idn.sensitive_access_grant ADD CONSTRAINT ck_sensitive_access_grant_5 CHECK ((field = 'PATIENT_PHONE') = (subject_donor_profile_id IS NULL));
+ALTER TABLE idn.sensitive_access_grant ADD CONSTRAINT ck_sensitive_access_grant_6 CHECK (field <> 'DONOR_EXACT_LOCATION' OR donor_location_id IS NOT NULL);
+ALTER TABLE idn.sensitive_access_grant ADD CONSTRAINT ck_sensitive_access_grant_7 CHECK (status = 'Active' OR ended_at IS NOT NULL);
+ALTER TABLE idn.permission ADD CONSTRAINT ck_permission_1 CHECK (key ~ '^[a-z_]+(\.[a-z_]+)+$');
+ALTER TABLE idn.permission_set ADD CONSTRAINT ck_permission_set_1 CHECK (kind <> 'BASE' OR role_code IN ('DON','PAT'));
+ALTER TABLE idn.permission_set ADD CONSTRAINT ck_permission_set_2 CHECK (kind NOT IN ('TIER','SCOPE') OR role_code IN ('SUP','MOD','ADM'));
+ALTER TABLE idn.user_permission_set ADD CONSTRAINT ck_user_permission_set_1 CHECK (granted_by IS DISTINCT FROM user_id);
+ALTER TABLE idn.user_permission_set ADD CONSTRAINT ck_user_permission_set_2 CHECK (approved_by IS NULL OR (approved_by <> user_id AND approved_by IS DISTINCT FROM granted_by));
+ALTER TABLE idn.user_permission_set ADD CONSTRAINT ck_user_permission_set_3 CHECK (expires_at IS NULL OR expires_at > effective_from);
+ALTER TABLE idn.user_permission_set ADD CONSTRAINT ck_user_permission_set_4 CHECK (status <> 'Revoked' OR (revoked_at IS NOT NULL AND revoke_reason IS NOT NULL));

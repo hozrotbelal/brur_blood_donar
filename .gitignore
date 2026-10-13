@@ -1,0 +1,360 @@
+# =============================================================================
+# .gitignore — Node / npm / Python / Java / .NET / Flutter
+#
+# Locked by a GitHub push ruleset. Malware has rewritten this file before
+# (appending `!.env*` so secrets got committed). To change it: switch the
+# ruleset off, edit, push, switch it back on.
+#
+# Deliberately NOT used, because they hide real source folders:
+#   lib/  lib64/  packages/  [Dd]ebug/  [Rr]elease/  parts/  var/  include/
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# Secrets & credentials — never commit
+# -----------------------------------------------------------------------------
+.env*
+*.env
+.envrc
+.secrets
+secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.ppk
+*.gpg
+id_rsa*
+id_ed25519*
+key.properties
+credentials.json
+service-account*.json
+*-credentials.json
+.aws/
+.netrc
+.npmrc
+.yarnrc
+.pypirc
+*.pubxml
+*.publishsettings
+local.properties
+
+# Safe templates (must stay below the rules above)
+!.env.example
+!*.env.example
+
+
+# -----------------------------------------------------------------------------
+# Editors & IDEs — .vscode/tasks.json was a malware vector
+# -----------------------------------------------------------------------------
+.vscode/
+.idea/
+.vs/
+.cursor/
+.fleet/
+.history/
+*.code-workspace
+*.sublime-project
+*.sublime-workspace
+*.iml
+*.ipr
+*.iws
+.project
+.classpath
+.settings/
+.factorypath
+.loadpath
+.metadata/
+nbproject/private/
+*.swp
+*.swo
+*~
+\#*\#
+.\#*
+
+
+# -----------------------------------------------------------------------------
+# Operating systems
+# -----------------------------------------------------------------------------
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+.fseventsd
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+desktop.ini
+$RECYCLE.BIN/
+*.lnk
+.directory
+.Trash-*
+
+
+# -----------------------------------------------------------------------------
+# Node / npm / yarn / pnpm / bun
+# -----------------------------------------------------------------------------
+node_modules/
+jspm_packages/
+web_modules/
+.npm/
+.pnpm-store/
+.yarn-integrity
+.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+*.tgz
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+.node_repl_history
+
+# Framework / bundler output & caches
+.next/
+.nuxt/
+.output/
+.svelte-kit/
+.astro/
+.angular/
+.docusaurus/
+.expo/
+.turbo/
+.vercel/
+.netlify/
+.serverless/
+.webpack/
+.parcel-cache/
+.vite/
+.cache/
+.eslintcache
+.stylelintcache
+.temp/
+*.tsbuildinfo
+storybook-static/
+/dist/
+/out/
+/build/
+
+# Test output
+coverage/
+.nyc_output/
+*.lcov
+junit*.xml
+playwright-report/
+test-results/
+blob-report/
+/playwright/.cache/
+
+
+# -----------------------------------------------------------------------------
+# Python
+# -----------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+__pypackages__/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.conda/
+.pixi/
+
+# Packaging
+*.egg-info/
+*.egg
+.eggs/
+.installed.cfg
+MANIFEST
+sdist/
+wheels/
+pip-log.txt
+pip-delete-this-directory.txt
+pip-wheel-metadata/
+.pdm.toml
+.pdm-python
+.pdm-build/
+
+# Tooling caches
+.tox/
+.nox/
+.pytest_cache/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.ruff_cache/
+.pyre/
+.pytype/
+.hypothesis/
+.pybuilder/
+cython_debug/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+*.py,cover
+nosetests.xml
+
+# Notebooks & frameworks
+.ipynb_checkpoints/
+profile_default/
+ipython_config.py
+celerybeat-schedule
+celerybeat.pid
+*.sage.py
+.webassets-cache
+.scrapy
+instance/
+db.sqlite3
+db.sqlite3-journal
+docs/_build/
+site/
+
+
+# -----------------------------------------------------------------------------
+# Java / Kotlin / Maven / Gradle
+# -----------------------------------------------------------------------------
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+*.ctxt
+.mtj.tmp/
+hs_err_pid*
+replay_pid*
+
+# Maven
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+.mvn/timing.properties
+!.mvn/wrapper/maven-wrapper.jar
+
+# Gradle
+.gradle/
+.kotlin/
+gradle-app.setting
+.gradletasknamecache
+!gradle-wrapper.jar
+!**/gradle/wrapper/gradle-wrapper.jar
+
+# IntelliJ build output
+out/
+
+
+# -----------------------------------------------------------------------------
+# .NET / C# / Visual Studio
+# -----------------------------------------------------------------------------
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+artifacts/
+TestResults/
+[Tt]est[Rr]esult*/
+*.trx
+*.coverage
+*.coveragexml
+*.user
+*.rsuser
+*.suo
+*.userosscache
+*.userprefs
+*.sln.docstates
+*.DotSettings.user
+_ReSharper*/
+*.[Rr]e[Ss]harper
+*.ncrunch*
+_NCrunch_*
+.cr/
+*.nupkg
+*.snupkg
+.nuget/
+project.lock.json
+project.fragment.lock.json
+*.pidb
+*.svclog
+*.VisualState.xml
+ScaffoldingReadMe.txt
+PublishScripts/
+BenchmarkDotNet.Artifacts/
+*.ilk
+*.ipch
+*.aps
+*.pch
+*.pgc
+*.pgd
+*.vspscc
+*.vssscc
+.builds
+*.sbr
+*.tlb
+*.tli
+*.tlh
+
+
+# -----------------------------------------------------------------------------
+# Flutter / Dart
+# -----------------------------------------------------------------------------
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+**/ios/Pods/
+**/ios/.symlinks/
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/flutter_export_environment.sh
+**/android/.cxx/
+**/android/captures/
+*.apk
+*.aab
+*.ipa
+xcuserdata/
+DerivedData/
+
+
+# -----------------------------------------------------------------------------
+# Logs, temp files, local databases
+# -----------------------------------------------------------------------------
+*.log
+logs/
+tmp/
+temp/
+*.tmp
+*.temp
+*.bak
+*.orig
+*.pid
+*.seed
+*.pid.lock
+*.sqlite
+*.sqlite3

@@ -1,0 +1,15 @@
+# Matching and invitations: assumptions to confirm
+
+**What is built:** a wave is created when a request is Verified (the worker does this, or Support taps "expand search"). Every donor with the requested blood group is checked against the SRS filters (FR-SRC-002 to 009), ordered by distance band, then latest Available response, then fewest invitations (FR-SRC-011), and the top batch is proposed. Support reviews and approves (removing anyone they want). Approval creates one Queued invitation per donor. The worker sends them, expires unanswered ones, and proposes the next wave at the next radius when a window ends with no Available answer. Donors list, open and answer their invitations.
+
+**Where I made choices:**
+- **Settings** are read from `cfg.config_setting` (status Active, global) and fall back to the SRS defaults: wave size 10 (Critical 20), radius steps 5, 10, 20, 40 km, 5 waves, 1 invite per 24 hours, 4 per 30 days, verified group needed for Routine only. Nothing seeds those settings yet.
+- **Donors of other blood groups are not stored as candidates.** FR-SRC-003 says to store EX_BLOOD_GROUP_MISMATCH, but that would add a row for nearly every donor in every wave. Approved `outreach_group_rule` rows are honoured, so donors in an approved outreach group are evaluated.
+- **Request location** comes from the request, then the hospital, then the area centre. With none of them, a search is refused (`REQUEST_HAS_NO_LOCATION`). The request form does not set a location yet.
+- **A donor who already has a live invitation for the same request** is excluded with EX_RECENTLY_INVITED. There is no separate code in the list for "never re-invite after Unavailable"; the unique invitation rule gives the same result.
+- **Contact hours** use the donor's own window in Bangladesh time. The organization-wide Routine hours (08:00 to 21:00) are not applied on top. Critical requests skip the donor window when the donor agreed to urgent invitations (`outreach.critical_bypass_contact_hours`).
+- **Response windows** are fixed: Critical 30 minutes, Urgent 2 hours, Routine 12 hours (SRS defaults, not read from settings). For a deferred invitation the window starts at the send time.
+- **Permissions:** `invitation.create` to expand or approve, `blood_request.view` to list waves, `invitation.view` and `invitation.respond` for donors.
+- **Invitation content** is request reference, hospital area, blood group, component, urgency and required date only. No patient name or contact is stored in the snapshot.
+
+**Not built:** creating the Coordination Case when the first donor says Available (Case Workflow module; for now the request just moves to Donor coordination), re-asking after a Later answer (the time is stored in `later_recheck_at`), pause and resume of outreach (the checks exist, nothing sets the flag), pushing the notifications themselves (the worker writes `InvitationSent` and `InvitationExpired` events), Phase 2 weighted ranking and auto-approve, escalation after the max waves, the donor map, and the search guardrails (FR-SRC-024 to 036).
