@@ -1,3 +1,4 @@
+import { fakeDb } from '../../../test/fake-db';
 import { Db } from '../db/database.service';
 import { AuditService } from '../audit/audit.service';
 import { OutboxService } from '../outbox/outbox.service';
@@ -28,12 +29,12 @@ describe('StatusHistoryService', () => {
   };
 
   it('writes the history row and an outbox audit event in the same transaction', async () => {
-    const query = jest.fn().mockResolvedValue({ rows: [], rowCount: 1 });
+    const tx = fakeDb();
     const service = new StatusHistoryService(new AuditService(new OutboxService()));
-    await service.record({ query } as unknown as Db, { ...change, from: 'A' }, machine);
-    expect(query).toHaveBeenCalledTimes(2);
-    expect(query.mock.calls[0][0]).toContain('aud.status_history');
-    expect(query.mock.calls[1][0]).toContain('platform.outbox_event');
+    await service.record(tx, { ...change, from: 'A' }, machine);
+    expect(tx.statements).toHaveLength(2);
+    expect(tx.statements[0].text).toContain('aud.status_history');
+    expect(tx.statements[1].text).toContain('"platform"."outbox_event"');
   });
 
   it('refuses an invalid transition before writing anything', async () => {

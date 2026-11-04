@@ -35,5 +35,15 @@ describe('PolicyService', () => {
     const area = principal([{ key: 'k', scope: 'Area' }]);
     expect(policy.decide(area, 'k', { resource: { areaIds: ['a1'] }, principalAreaIds: ['a1'] }).allowed).toBe(true);
     expect(policy.decide(area, 'k', { resource: { areaIds: ['a2'] }, principalAreaIds: ['a1'] }).allowed).toBe(false);
+    expect(policy.decide(area, 'k', { resource: { areaIds: ['a2'], assignedUserIds: ['u1'] }, principalAreaIds: ['a1'] }).allowed).toBe(true);
+    expect(policy.decide(area, 'k', { resource: { areaIds: ['a2'], assignedUserIds: ['someone-else'] }, principalAreaIds: ['a1'] }).allowed).toBe(false);
+  });
+
+  it('requires a fresh step-up for sensitive permissions', () => {
+    const sensitive = principal([{ key: 'permission.manage', scope: 'All', requiresStepUp: true }]);
+    expect(policy.decide(sensitive, 'permission.manage').reason).toBe('STEP_UP_REQUIRED');
+    expect(policy.decide({ ...sensitive, stepUpAt: new Date(Date.now() - 10 * 60_000) }, 'permission.manage').reason).toBe('STEP_UP_REQUIRED');
+    expect(policy.decide({ ...sensitive, stepUpAt: new Date(Date.now() - 60_000) }, 'permission.manage').allowed).toBe(true);
+    expect(policy.decide(principal([{ key: 'k', scope: 'Own' }]), 'k', { resource: { ownerUserId: 'u1' } }).allowed).toBe(true);
   });
 });

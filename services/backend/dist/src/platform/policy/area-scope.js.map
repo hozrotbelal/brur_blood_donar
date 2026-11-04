@@ -1,0 +1,1 @@
+{"version":3,"file":"area-scope.js","sourceRoot":"","sources":["../../../../src/platform/policy/area-scope.ts"],"names":[],"mappings":";;AAEA,oCAOC;AAPM,KAAK,UAAU,YAAY,CAAC,EAAM,EAAE,MAAc;IACvD,MAAM,EAAE,IAAI,EAAE,GAAG,MAAM,EAAE,CAAC,KAAK,CAC7B;wGACoG,EACpG,CAAC,MAAM,CAAC,CACT,CAAC;IACF,OAAO,IAAI,CAAC,GAAG,CAAC,CAAC,CAAC,EAAE,EAAE,CAAC,CAAC,CAAC,OAAO,CAAC,CAAC;AACpC,CAAC"}

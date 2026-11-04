@@ -9,8 +9,9 @@ import { StatusHistoryService } from '../../src/platform/status/status-history.s
 import { AuthService } from '../../src/modules/identity/auth.service';
 import { PasswordService } from '../../src/modules/identity/password.service';
 import { SmsSender } from '../../src/modules/identity/sms.port';
-import { TokenService } from '../../src/modules/identity/token.service';
+import { TokenService } from '../../src/platform/security/token.service';
 import { RequestService } from '../../src/modules/request/request.service';
+import { buildAuth, setupTokenOf, testDevice } from './identity-harness';
 
 const url = process.env.TEST_DATABASE_URL;
 const suite = url ? describe : describe.skip;
@@ -33,11 +34,11 @@ suite('request flow (needs TEST_DATABASE_URL with all migrations applied)', () =
   async function newPatientUser(): Promise<Principal> {
     const p = phone();
     const { challengeId } = await auth.register({ phone: p, role: 'PAT', language: 'bn' });
-    const { setupToken } = await auth.verifyOtp({ challengeId, code: sms.last, role: 'PAT', language: 'bn' });
+    const setupToken = setupTokenOf(await auth.verifyOtp({ challengeId, code: sms.last, role: 'PAT', language: 'bn' }));
     await auth.setPassword({
       setupToken,
       password: 'correct horse battery',
-      device: { installId: randomUUID(), platform: 'android', model: 'T', osVersion: '14', appVersion: '1' },
+      device: testDevice(),
     });
     const row = await db.query<{ id: string }>('SELECT id FROM idn.app_user WHERE phone_e164 = $1', [`+880${p.slice(1)}`]);
     const userId = row.rows[0].id;
@@ -59,8 +60,8 @@ suite('request flow (needs TEST_DATABASE_URL with all migrations applied)', () =
     const tokens = new TokenService({ nodeEnv: 'test', jwtPrivateKeyPath: '' } as AppConfig);
     const outbox = new OutboxService();
     const audit = new AuditService(outbox);
-    auth = new AuthService(db, new PasswordService(), tokens, sms, outbox, audit);
-    requests = new RequestService(db, new PolicyService(), new StatusHistoryService(audit), outbox);
+    auth = buildAuth(db, tokens, sms, outbox, audit);
+    requests = new RequestService(db, new PolicyService(), new StatusHistoryService(audit), outbox, audit);
   });
   afterAll(() => db.onModuleDestroy());
 
@@ -121,5 +122,56 @@ suite('request flow (needs TEST_DATABASE_URL with all migrations applied)', () =
     const draft = await requests.createRequest(user, body(patient.id));
     await db.query("UPDATE req.blood_request SET status = 'Awaiting outcome' WHERE id = $1", [draft.id]);
     await expect(requests.cancel(user, draft.id, { reason: 'OTHER' })).rejects.toMatchObject({ response: { code: 'INVALID_TRANSITION' } });
+  });
+
+  it('edits a draft directly, auto-applies non-material changes and holds material ones for Support', async () => {
+    const user = await newPatientUser();
+    const patient = await requests.createPatient(user, { displayName: 'P', relationship: 'SELF', hospitalPatientRef: 'PT-0001' });
+    const draft = await requests.createRequest(user, body(patient.id));
+    expect(draft.patientRef).toBe('PT-0001');
+
+    const edited = await requests.updateRequest(user, draft.id, { requestedBloodGroup: 'A+', specialInstructions: 'Ward 4' });
+    expect(edited.request.requestedBloodGroup).toBe('A+');
+    expect(edited.changes.every((c) => c.status === 'Auto-applied')).toBe(true);
+
+    await requests.submit(user, draft.id);
+    const result = await requests.updateRequest(user, draft.id, { specialInstructions: 'Ward 5', quantityUnits: 4 });
+    expect(result.request.specialInstructions).toBe('Ward 5');
+    expect(result.request.quantityUnits).toBe(2);
+    expect(result.changes.map((c) => [c.changeType, c.status])).toEqual([
+      ['SPECIAL_INSTRUCTIONS', 'Auto-applied'],
+      ['QUANTITY', 'Pending'],
+    ]);
+    await expect(requests.updateRequest(user, draft.id, { quantityUnits: 5 })).rejects.toMatchObject({ response: { code: 'CHANGE_PENDING' } });
+    await expect(requests.updateRequest(user, draft.id, { specialInstructions: 'Ward 5' })).rejects.toMatchObject({ response: { code: 'NO_CHANGES' } });
+    expect(await requests.listChanges(user, draft.id)).toHaveLength(4);
+
+    const history = await db.query<{ n: string }>(
+      "SELECT count(*) AS n FROM aud.status_history WHERE entity_type = 'REQUEST_CHANGE' AND context_request_id = $1",
+      [draft.id],
+    );
+    expect(Number(history.rows[0].n)).toBe(4);
+  });
+
+  it('raises priority on an urgent problem and returns aggregate counts only', async () => {
+    const user = await newPatientUser();
+    const patient = await requests.createPatient(user, { displayName: 'P', relationship: 'SELF' });
+    const draft = await requests.createRequest(user, body(patient.id));
+    await expect(requests.reportUrgentProblem(user, draft.id, {})).rejects.toMatchObject({ response: { code: 'URGENT_PROBLEM_NOT_ALLOWED' } });
+    await requests.submit(user, draft.id);
+    expect((await requests.reportUrgentProblem(user, draft.id, {})).priority).toBe('High');
+    expect((await requests.reportUrgentProblem(user, draft.id, {})).priority).toBe('Critical');
+    expect(await requests.progress(user, draft.id)).toEqual({ contacted: 0, responded: 0, willing: 0, searchWave: 0 });
+
+    const timeline = await requests.timeline(user, draft.id);
+    expect(timeline.map((e) => e.actorRole)).toEqual(['PAT', 'PAT']);
+  });
+
+  it('refuses updates once the request is awaiting outcome', async () => {
+    const user = await newPatientUser();
+    const patient = await requests.createPatient(user, { displayName: 'P', relationship: 'SELF' });
+    const draft = await requests.createRequest(user, body(patient.id));
+    await db.query("UPDATE req.blood_request SET status = 'Awaiting outcome' WHERE id = $1", [draft.id]);
+    await expect(requests.updateRequest(user, draft.id, { specialInstructions: 'x' })).rejects.toMatchObject({ response: { code: 'UPDATE_NOT_ALLOWED' } });
   });
 });

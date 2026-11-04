@@ -24,7 +24,7 @@ Document 04 says the migration seeds "the everyday record keys behind the matrix
 - `data_request.approve` is held by Moderation Lead, Administrator and Primary Administrator.
 - `contact_history.view` is marked sensitive, because viewing it is a sensitive read.
 - `donor.phone.export` exists in the catalogue but is in no set, as the document requires.
-- Sensitive flags follow section 15.5: phone reveal, exact-location reveal, advanced search, exports, audit export, login history and permission management. Reason and step-up flags are set on the same keys. Nothing enforces step-up yet.
+- Sensitive flags follow section 15.5: phone reveal, exact-location reveal, advanced search, exports, audit export, login history and permission management. Reason and step-up flags are set on the same keys. Since backlog item 13 the policy decision point enforces `requires_step_up` (a step-up proof within 5 minutes on the session, see `docs/decisions/identity-assumptions.md`); `requires_reason` is still checked by each service.
 - Phase 2 keys (community, campaigns) are seeded with least-privilege holders.
 - Bangla descriptions are my wording and need a native-speaker review.
 
@@ -32,3 +32,4 @@ Document 04 says the migration seeds "the everyday record keys behind the matrix
 
 - The trigger that stops anyone granting a permission they do not hold (`idn.check_grantor`) exists, but no grant API is built yet.
 - Phase 2 SCOPE sets (`scope.campaigns`, `scope.volunteer_tasks`, `scope.escalation_lead`) are not seeded.
+- Scope `Area` covers resources in the staff member's areas and resources assigned to that person, so a wider scope never sees less than a narrower one (OI-36, approved by the project owner on 14 Oct 2026). A scoped area also covers every area below it (OI-37, approved on 14 Oct 2026); a lower area never covers its parent.

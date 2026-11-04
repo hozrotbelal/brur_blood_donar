@@ -2,8 +2,8 @@ import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
 import { DatabaseService, Db } from '../../platform/db/database.service';
 import { DomainEvent, EventBus } from '../../platform/outbox/event-bus';
 import { NotificationService } from './notification.service';
-import { Lang, Recipient } from './notification.types';
-import { appointmentLabel, formatTime, outcomeLabel, urgencyLabel } from './template.renderer';
+import { Lang, NotificationRole, Recipient } from './notification.types';
+import { appointmentLabel, formatTime, outcomeLabel, securityEventLabel, urgencyLabel } from './template.renderer';
 
 interface RequestInfo {
   id: string;
@@ -41,6 +41,20 @@ export class NotificationPlanner implements OnModuleInit {
     on('RequestCancelled', (tx, e) => this.requestClosed(tx, e, true));
     on('RequestUnableToFulfil', (tx, e) => this.requestClosed(tx, e, true));
     on('RequestRejected', (tx, e) => this.requestClosed(tx, e, false));
+    on('SecurityAlertRaised', (tx, e) => this.securityAlert(tx, e));
+    on('InvitationsCancelled', (tx, e) => this.invitationsCancelled(tx, e));
+  }
+
+  private async securityAlert(tx: Db, e: DomainEvent) {
+    const role = e.payload.role as NotificationRole | undefined;
+    const kind = String(e.payload.kind ?? '');
+    if (!role || !kind) return;
+    const occurredAt = typeof e.payload.occurredAt === 'string' ? new Date(e.payload.occurredAt) : new Date();
+    await this.notifications.enqueue(tx, {
+      eventCode: 'NTF-EV-21', aggregateType: 'APP_USER', aggregateId: e.aggregateId, dedupeBase: `ev:${e.id}`, sourceOutboxEventId: e.id,
+      recipients: [{ userId: e.aggregateId, role }],
+      vars: (lang) => ({ event: securityEventLabel(lang, kind), time: formatTime(lang, occurredAt) }),
+    });
   }
 
   async scheduleReminders(limit = 200): Promise<number> {
@@ -202,6 +216,20 @@ export class NotificationPlanner implements OnModuleInit {
       ...this.base(e, req), eventCode: 'NTF-EV-09',
       recipients: [{ userId: req.requester, role: 'PAT' }, ...(await this.staff(tx, req)), ...donors.rows.map((d) => ({ userId: d.user_id, role: 'DON' as const }))],
       vars: (lang) => ({ ref: req.reference_no ?? '', outcome: outcomeLabel(lang, kind) }),
+    });
+  }
+
+  private async invitationsCancelled(tx: Db, e: DomainEvent) {
+    const req = await this.request(tx, e.aggregateId);
+    const ids = Array.isArray(e.payload.invitationIds) ? (e.payload.invitationIds as string[]) : [];
+    if (!req || ids.length === 0) return;
+    const donors = await tx.query<{ user_id: string }>(
+      `SELECT DISTINCT d.user_id FROM src.invitation i JOIN idn.donor_profile d ON d.id = i.donor_profile_id WHERE i.id = ANY($1::uuid[])`,
+      [ids],
+    );
+    await this.notifications.enqueue(tx, {
+      ...this.base(e, req), eventCode: 'NTF-EV-13',
+      recipients: donors.rows.map((d) => ({ userId: d.user_id, role: 'DON' as const })), vars: { ref: req.reference_no ?? '' },
     });
   }
 

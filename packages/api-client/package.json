@@ -1,0 +1,14 @@
+{
+  "name": "@bbda/api-client",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Typed API types generated from packages/api-contract/openapi.json",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "generate": "openapi-typescript ../api-contract/openapi.json -o src/schema.ts"
+  },
+  "devDependencies": {
+    "openapi-typescript": "7.13.0"
+  }
+}

@@ -24,4 +24,5 @@ Rules:
 - Cross-module writes are forbidden.
 - Modules communicate in-process through public interfaces and asynchronously through domain events written to `outbox_event` in the same transaction.
 - Authorization runs in the shared policy component before module logic; modules re-check ownership.
-- Automated architecture tests fail the build if a module imports another module's internals.
+- Each module has a generated `schema.ts` for its own tables (ADR-16). No module imports another module's `schema.ts` or the platform schema.
+- Automated architecture tests fail the build if a module imports another module's internals or schema file, or if a module that owns tables has no generated schema file.

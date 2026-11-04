@@ -9,9 +9,10 @@ import { StatusHistoryService } from '../../src/platform/status/status-history.s
 import { AuthService } from '../../src/modules/identity/auth.service';
 import { PasswordService } from '../../src/modules/identity/password.service';
 import { SmsSender } from '../../src/modules/identity/sms.port';
-import { TokenService } from '../../src/modules/identity/token.service';
+import { TokenService } from '../../src/platform/security/token.service';
 import { RequestService } from '../../src/modules/request/request.service';
 import { ReviewService, checklistGaps, widestScope } from '../../src/modules/request/review.service';
+import { buildAuth, setupTokenOf, testDevice } from './identity-harness';
 
 const url = process.env.TEST_DATABASE_URL;
 const suite = url ? describe : describe.skip;
@@ -59,11 +60,11 @@ suite('staff request review (needs TEST_DATABASE_URL with all migrations applied
   async function newPatientUser(): Promise<Principal> {
     const p = phone();
     const { challengeId } = await auth.register({ phone: p, role: 'PAT', language: 'bn' });
-    const { setupToken } = await auth.verifyOtp({ challengeId, code: sms.last, role: 'PAT', language: 'bn' });
+    const setupToken = setupTokenOf(await auth.verifyOtp({ challengeId, code: sms.last, role: 'PAT', language: 'bn' }));
     await auth.setPassword({
       setupToken,
       password: 'correct horse battery',
-      device: { installId: randomUUID(), platform: 'android', model: 'T', osVersion: '14', appVersion: '1' },
+      device: testDevice(),
     });
     const row = await db.query<{ id: string }>('SELECT id FROM idn.app_user WHERE phone_e164 = $1', [`+880${p.slice(1)}`]);
     return { userId: row.rows[0].id, role: 'PAT', grants: await auth.loadGrants(row.rows[0].id, 'PAT') };
@@ -113,8 +114,8 @@ suite('staff request review (needs TEST_DATABASE_URL with all migrations applied
     const outbox = new OutboxService();
     const audit = new AuditService(outbox);
     const history = new StatusHistoryService(audit);
-    auth = new AuthService(db, new PasswordService(), tokens, sms, outbox, audit);
-    requests = new RequestService(db, new PolicyService(), history, outbox);
+    auth = buildAuth(db, tokens, sms, outbox, audit);
+    requests = new RequestService(db, new PolicyService(), history, outbox, audit);
     review = new ReviewService(db, new PolicyService(), history, outbox);
   });
   afterAll(() => db.onModuleDestroy());
@@ -262,5 +263,77 @@ suite('staff request review (needs TEST_DATABASE_URL with all migrations applied
     expect(flags).toContain('RAPID_SUBMISSION');
     expect((await review.flags(third.id)).map((f) => f.flagType)).not.toContain('RAPID_SUBMISSION');
     expect(fourth.id).toBeDefined();
+  });
+
+  it('lets the assigned agent approve one pending change and reject another, keeping old values until approval', async () => {
+    const areaId = await newArea();
+    const user = await newPatientUser();
+    const agent = await newStaff('SUP', 'TIER_SUPPORT_AGENT', areaId);
+    const request = await submitted(user, areaId);
+    await review.pickUp(agent, request.id);
+
+    const { changes } = await requests.updateRequest(user, request.id, { quantityUnits: 3, urgency: 'Critical' });
+    const quantity = changes.find((c) => c.changeType === 'QUANTITY')!;
+    const urgency = changes.find((c) => c.changeType === 'URGENCY')!;
+    expect((await requests.getRequest(user, request.id)).quantityUnits).toBe(1);
+
+    const detail = await review.detail(agent, request.id);
+    expect(detail.changes.filter((c) => c.status === 'Pending')).toHaveLength(2);
+
+    const approved = await review.approveChange(agent, request.id, quantity.id, {});
+    expect(approved.quantityUnits).toBe(3);
+    expect(approved.changes.find((c) => c.id === quantity.id)?.status).toBe('Approved');
+    await expect(review.approveChange(agent, request.id, quantity.id, {})).rejects.toMatchObject({ response: { code: 'CHANGE_NOT_PENDING' } });
+
+    const rejected = await review.rejectChange(agent, request.id, urgency.id, { reason: 'Requisition says Urgent' });
+    expect(rejected.urgency).toBe('Urgent');
+    expect(rejected.changes.find((c) => c.id === urgency.id)?.status).toBe('Rejected');
+
+    const events = await db.query<{ event_type: string }>(
+      `SELECT event_type FROM platform.outbox_event WHERE aggregate_id = $1 AND event_type IN ('RequestChanged','RequestChangeApproved','RequestChangeRejected') ORDER BY created_at`,
+      [request.id],
+    );
+    expect(events.rows.map((r) => r.event_type)).toEqual(['RequestChanged', 'RequestChangeApproved', 'RequestChangeRejected']);
+    const history = await db.query<{ to_status: string }>(
+      `SELECT to_status FROM aud.status_history WHERE entity_type = 'REQUEST_CHANGE' AND entity_id = $1 ORDER BY occurred_at`,
+      [quantity.id],
+    );
+    expect(history.rows.map((r) => r.to_status)).toEqual(['Pending', 'Approved']);
+  });
+
+  it('hides change decisions from staff outside the area', async () => {
+    const areaId = await newArea();
+    const user = await newPatientUser();
+    const request = await submitted(user, areaId);
+    const { changes } = await requests.updateRequest(user, request.id, { quantityUnits: 2 });
+    const outsider = await newStaff('SUP', 'TIER_SUPPORT_AGENT', await newArea());
+    await expect(review.approveChange(outsider, request.id, changes[0].id, {})).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('lets an Area-scoped lead open a request assigned to them outside their area (OI-36)', async () => {
+    const user = await newPatientUser();
+    const request = await submitted(user, await newArea());
+    const lead = await newStaff('SUP', 'TIER_SUPPORT_LEAD', await newArea());
+    const otherLead = await newStaff('SUP', 'TIER_SUPPORT_LEAD', await newArea());
+    await db.query('UPDATE req.blood_request SET assigned_support_user_id = $2 WHERE id = $1', [request.id, lead.userId]);
+    expect((await review.detail(lead, request.id)).id).toBe(request.id);
+    await expect(review.detail(otherLead, request.id)).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('lets district access cover requests in its upazilas, but not the other way round (OI-37)', async () => {
+    const district = await newArea();
+    const upazila = await db.query<{ id: string }>(
+      `INSERT INTO cfg.area (level, code, name_en, name_bn, parent_id, is_active) VALUES ('UPAZILA', $1, 'Test', 'পরীক্ষা', $2, true) RETURNING id`,
+      [`T-${randomUUID()}`, district],
+    );
+    const user = await newPatientUser();
+    const request = await submitted(user, upazila.rows[0].id);
+    const districtLead = await newStaff('SUP', 'TIER_SUPPORT_LEAD', district);
+    expect((await review.detail(districtLead, request.id)).id).toBe(request.id);
+    expect((await review.queue(districtLead)).map((r) => r.id)).toContain(request.id);
+
+    const districtRequest = await submitted(user, district);
+    const upazilaLead = await newStaff('SUP', 'TIER_SUPPORT_LEAD', upazila.rows[0].id);
+    await expect(review.detail(upazilaLead, districtRequest.id)).rejects.toMatchObject({ status: 404 });
   });
 });

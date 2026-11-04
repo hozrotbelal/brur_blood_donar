@@ -10,7 +10,7 @@ import { AuthService } from '../../src/modules/identity/auth.service';
 import { DonorService } from '../../src/modules/identity/donor.service';
 import { PasswordService } from '../../src/modules/identity/password.service';
 import { SmsSender } from '../../src/modules/identity/sms.port';
-import { TokenService } from '../../src/modules/identity/token.service';
+import { TokenService } from '../../src/platform/security/token.service';
 import { RequestService } from '../../src/modules/request/request.service';
 import { ReviewService } from '../../src/modules/request/review.service';
 import { InvitationService } from '../../src/modules/matching/invitation.service';
@@ -20,6 +20,7 @@ import { AppointmentService } from '../../src/modules/case-workflow/appointment.
 import { OutcomeService } from '../../src/modules/case-workflow/outcome.service';
 import { OutreachService } from '../../src/modules/request/outreach.service';
 import { MatchingService } from '../../src/modules/matching/matching.service';
+import { buildAuth, setupTokenOf, testDevice } from './identity-harness';
 
 const url = process.env.TEST_DATABASE_URL;
 const suite = url ? describe : describe.skip;
@@ -58,10 +59,10 @@ suite('coordination cases, appointments and outcomes (needs TEST_DATABASE_URL wi
   async function newUser(role: 'DON' | 'PAT'): Promise<Principal> {
     const p = phone();
     const { challengeId } = await auth.register({ phone: p, role, language: 'bn' });
-    const { setupToken } = await auth.verifyOtp({ challengeId, code: sms.last, role, language: 'bn' });
+    const setupToken = setupTokenOf(await auth.verifyOtp({ challengeId, code: sms.last, role, language: 'bn' }));
     await auth.setPassword({
       setupToken, password: 'correct horse battery',
-      device: { installId: randomUUID(), platform: 'android', model: 'T', osVersion: '14', appVersion: '1' },
+      device: testDevice(),
     });
     const row = await db.query<{ id: string }>('SELECT id FROM idn.app_user WHERE phone_e164 = $1', [`+880${p.slice(1)}`]);
     return { userId: row.rows[0].id, role, grants: await auth.loadGrants(row.rows[0].id, role) };
@@ -136,9 +137,9 @@ suite('coordination cases, appointments and outcomes (needs TEST_DATABASE_URL wi
     const history = new StatusHistoryService(audit);
     policy = new PolicyService();
     const support = new CaseSupport(policy, history, outbox);
-    auth = new AuthService(db, new PasswordService(), tokens, sms, outbox, audit);
+    auth = buildAuth(db, tokens, sms, outbox, audit);
     donors = new DonorService(db, history, outbox);
-    requests = new RequestService(db, policy, history, outbox);
+    requests = new RequestService(db, policy, history, outbox, audit);
     review = new ReviewService(db, policy, history, outbox);
     matching = new MatchingService(db, policy, history, outbox);
     cases = new CaseService(db, support, history);

@@ -1,5 +1,5 @@
 import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Req } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOkResponse, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { RequirePermission } from '../../platform/policy/policy.guard';
 import { Principal } from '../../platform/policy/policy.types';
 import { AppointmentService } from './appointment.service';
@@ -7,8 +7,10 @@ import {
   CloseCaseDto, ContactAttemptDto, DeclareUnableDto, DisputeOutcomeDto, ResolveDisputeDto, MoreDonorsDto, NoteDto, ProposeAppointmentDto, RecordOutcomeDto, RescheduleDto,
   TimingProblemDto,
 } from './case.dto';
+import { CaseListItemDto } from './case-list.dto';
 import { CaseService } from './case.service';
 import { OutcomeService } from './outcome.service';
+import { DonorAppointmentDto } from './appointment-view.dto';
 
 interface Req {
   principal: Principal;
@@ -24,7 +26,7 @@ export class CaseController {
     private readonly outcomes: OutcomeService,
   ) {}
 
-  @Get('cases') @RequirePermission('case.view', 'Assigned')
+  @Get('cases') @RequirePermission('case.view', 'Assigned') @ApiOkResponse({ type: [CaseListItemDto] })
   list(@Req() req: Req) {
     return this.cases.list(req.principal);
   }
@@ -106,7 +108,7 @@ export class CaseController {
 export class DonorAppointmentController {
   constructor(private readonly appointments: AppointmentService) {}
 
-  @Get() @RequirePermission('appointment.view', 'Own')
+  @Get() @RequirePermission('appointment.view', 'Own') @ApiResponse({ status: 200, type: [DonorAppointmentDto] })
   list(@Req() req: Req) {
     return this.appointments.listForDonor(req.principal);
   }

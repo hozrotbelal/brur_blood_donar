@@ -1,115 +1,144 @@
-import {
-  BadRequestException,
-  ConflictException,
-  HttpException,
-  HttpStatus,
-  Inject,
-  Injectable,
-  UnauthorizedException,
-} from '@nestjs/common';
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { BadRequestException, ConflictException, HttpStatus, Inject, Injectable, Logger, Optional, UnauthorizedException } from '@nestjs/common';
+import { and, eq, exists, gt, isNull, sql } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
 import { AuditService } from '../../platform/audit/audit.service';
+import { APP_CONFIG, AppConfig } from '../../platform/config/app-config';
 import { Db, DatabaseService } from '../../platform/db/database.service';
-import { Grant, PermissionScope } from '../../platform/policy/policy.types';
+import { Grant, PermissionScope, RoleCode } from '../../platform/policy/policy.types';
 import { OutboxService } from '../../platform/outbox/outbox.service';
-import { OTP_MAX_ATTEMPTS, OTP_REQUESTS_PER_15_MIN, OTP_TTL_SECONDS, generateOtp, hashOtp, otpMatches } from './otp';
+import { DeviceProof, verifyDeviceProof } from '../../platform/security/device-proof';
+import { TokenService } from '../../platform/security/token.service';
+import {
+  AuthSupport, DeviceInfo, LOCK_AFTER_FAILURES, LOCK_BASE_MINUTES, LOCK_MAX_MINUTES, MfaChallenge, PUBLIC_REFRESH_DAYS, SETUP_TTL_SECONDS,
+  STAFF_MFA_DAYS, STAFF_REFRESH_DAYS, TokenPair, fail, minutesFromNow, sha256,
+} from './auth.support';
+import { PasswordFlowService } from './password-flow.service';
 import { PasswordService } from './password.service';
 import { checkPassword } from './password-policy';
 import { normalizeBdPhone } from './phone';
-import { SmsSender } from './sms.port';
-import { TokenService } from './token.service';
+import { appUser, credential, device, permission, permissionSet, permissionSetItem, role, session, userPermissionSet, userRole } from './schema';
 
-export const ACCESS_TTL_SECONDS = 900;
-export const SETUP_TTL_SECONDS = 900;
-const PUBLIC_REFRESH_DAYS = 30;
-const STAFF_REFRESH_DAYS = 1;
-const STAFF_MFA_DAYS = 30;
-const LOCK_AFTER_FAILURES = 5;
-const LOCK_BASE_MINUTES = 15;
-const LOCK_MAX_MINUTES = 1440;
+export { ACCESS_TTL_SECONDS, SETUP_TTL_SECONDS } from './auth.support';
+export type { DeviceInfo, MfaChallenge, TokenPair } from './auth.support';
 
-export interface DeviceInfo {
-  installId: string;
-  platform: 'android' | 'ios';
-  model: string;
-  osVersion: string;
-  appVersion: string;
-  isRooted?: boolean;
+export interface SessionState {
+  stepUpAt: Date | null;
+  deviceId: string;
 }
 
-export interface MfaChallenge {
-  mfaRequired: true;
-  challengeId: string;
-  expiresInSeconds: number;
+interface CredentialRow {
+  id: string;
+  accountStatus: string;
+  isStaff: boolean;
+  passwordHash: string;
+  lockedUntil: Date | null;
+  failedAttempts: number;
+  lockCount24h: number;
 }
 
-export interface TokenPair {
-  accessToken: string;
-  refreshToken: string;
-  expiresIn: number;
-  role: string;
-}
-
-const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
-const fail = (status: HttpStatus, code: string) => new HttpException({ code }, status);
+const HASH_PARAMS = { memoryKiB: 19456, timeCost: 2, parallelism: 1 };
 
 @Injectable()
 export class AuthService {
   private dummyHash?: Promise<string>;
+  private readonly skipStaffSmsCode: boolean;
 
   constructor(
     @Inject(DatabaseService) private readonly db: DatabaseService,
     private readonly passwords: PasswordService,
     private readonly tokens: TokenService,
-    private readonly sms: SmsSender,
     private readonly outbox: OutboxService,
     private readonly audit: AuditService,
-  ) {}
+    private readonly support: AuthSupport,
+    private readonly passwordFlows: PasswordFlowService,
+    @Optional() @Inject(APP_CONFIG) config?: AppConfig,
+  ) {
+    this.skipStaffSmsCode = config?.devSkipStaffSmsCode === true && (config.nodeEnv === 'development' || config.nodeEnv === 'test');
+    if (this.skipStaffSmsCode) new Logger(AuthService.name).warn('DEV_SKIP_STAFF_SMS_CODE is on: staff sign in without the SMS second step (development only)');
+  }
 
   async register(input: { phone: string; role: 'DON' | 'PAT'; language: 'bn' | 'en'; ip?: string }) {
     const phone = normalizeBdPhone(input.phone);
     if (!phone) throw new BadRequestException({ code: 'INVALID_PHONE' });
-    const recent = await this.db.query<{ n: number }>(
-      `SELECT count(*)::int AS n FROM idn.otp_challenge
-        WHERE phone_e164 = $1 AND purpose = 'REGISTRATION' AND created_at > now() - interval '15 minutes'`,
-      [phone],
-    );
-    if (recent.rows[0].n >= OTP_REQUESTS_PER_15_MIN) throw fail(HttpStatus.TOO_MANY_REQUESTS, 'OTP_RATE_LIMITED');
-
-    const challengeId = randomUUID();
-    const code = generateOtp();
-    await this.db.query(
-      `INSERT INTO idn.otp_challenge (id, phone_e164, purpose, code_hash, expires_at, request_ip)
-       VALUES ($1, $2, 'REGISTRATION', $3, now() + make_interval(secs => $4), $5)`,
-      [challengeId, phone, hashOtp(challengeId, code), OTP_TTL_SECONDS, input.ip ?? null],
-    );
-    await this.sms.send(phone, `BBDA code: ${code}`);
-    return { challengeId, expiresInSeconds: OTP_TTL_SECONDS };
+    return this.support.issueOtp(this.db, { phone, purpose: 'REGISTRATION', ip: input.ip });
   }
 
-  async verifyOtp(input: { challengeId: string; code: string; role: 'DON' | 'PAT'; language: 'bn' | 'en' }) {
-    const outcome = await this.db.transaction(async (tx) => {
-      const { rows } = await tx.query<{ phone_e164: string; code_hash: string; attempts: number; expired: boolean; consumed_at: Date | null }>(
-        `SELECT phone_e164, code_hash, attempts, consumed_at, expires_at <= now() AS expired
-           FROM idn.otp_challenge WHERE id = $1 AND purpose = 'REGISTRATION' FOR UPDATE`,
-        [input.challengeId],
-      );
-      const row = rows[0];
-      if (!row || row.consumed_at || row.expired || row.attempts >= OTP_MAX_ATTEMPTS) return { ok: false as const };
-      if (!otpMatches(input.challengeId, input.code, row.code_hash)) {
-        await tx.query('UPDATE idn.otp_challenge SET attempts = attempts + 1 WHERE id = $1', [input.challengeId]);
-        return { ok: false as const };
+  async loginOtp(input: { phone: string; ip?: string }): Promise<{ accepted: true }> {
+    const phone = normalizeBdPhone(input.phone);
+    if (phone && (await this.support.otpAllowed(this.db, phone, 'LOGIN_FALLBACK', input.ip))) {
+      const [user] = await this.db.orm
+        .select({ id: appUser.id })
+        .from(appUser)
+        .leftJoin(credential, eq(credential.userId, appUser.id))
+        .where(
+          and(
+            eq(appUser.phoneE164, phone), isNull(appUser.deletedAt), eq(appUser.isStaff, false), eq(appUser.accountStatus, 'Active'),
+            sql`(${credential.lockedUntil} is null or ${credential.lockedUntil} <= now())`,
+          ),
+        );
+      if (user) {
+        const otp = await this.support.createOtp(this.db, { phone, purpose: 'LOGIN_FALLBACK', userId: user.id, ip: input.ip });
+        void this.support.sendCode(phone, otp.code).catch(() => undefined);
       }
-      await tx.query('UPDATE idn.otp_challenge SET consumed_at = now() WHERE id = $1', [input.challengeId]);
-      return { ok: true as const, phone: row.phone_e164 };
-    });
+    }
+    return { accepted: true };
+  }
+
+  async verifyOtp(input: { challengeId: string; code: string; role?: 'DON' | 'PAT'; language?: 'bn' | 'en'; device?: DeviceInfo; ip?: string }) {
+    const purpose = await this.support.purposeOf(this.db, input.challengeId);
+    switch (purpose) {
+      case 'REGISTRATION':
+        return this.verifyRegistrationOtp(input);
+      case 'PASSWORD_RESET':
+        return this.verifyResetOtp(input);
+      case 'LOGIN_FALLBACK':
+        return this.verifyLoginOtp(input);
+      default:
+        throw new BadRequestException({ code: 'OTP_INVALID' });
+    }
+  }
+
+  private async verifyRegistrationOtp(input: { challengeId: string; code: string; role?: 'DON' | 'PAT'; language?: 'bn' | 'en' }) {
+    if (!input.role || !input.language) throw new BadRequestException({ code: 'ROLE_AND_LANGUAGE_REQUIRED' });
+    const outcome = await this.db.transaction((tx) => this.support.consumeOtp(tx, input.challengeId, input.code, 'REGISTRATION'));
     if (!outcome.ok) throw new BadRequestException({ code: 'OTP_INVALID' });
-    const setupToken = this.tokens.issue(
-      'setup',
-      { phone: outcome.phone, role: input.role, lang: input.language, jti: input.challengeId },
-      SETUP_TTL_SECONDS,
-    );
+    const setupToken = this.tokens.issue('setup', { phone: outcome.phone, role: input.role, lang: input.language, jti: input.challengeId }, SETUP_TTL_SECONDS);
     return { setupToken };
+  }
+
+  private async verifyResetOtp(input: { challengeId: string; code: string }) {
+    return this.db.transaction(async (tx) => {
+      const outcome = await this.support.consumeOtp(tx, input.challengeId, input.code, 'PASSWORD_RESET');
+      if (!outcome.ok || !outcome.userId) throw new BadRequestException({ code: 'OTP_INVALID' });
+      return this.passwordFlows.issueResetToken(tx, input.challengeId);
+    });
+  }
+
+  private async verifyLoginOtp(input: { challengeId: string; code: string; role?: 'DON' | 'PAT'; device?: DeviceInfo; ip?: string }): Promise<TokenPair> {
+    if (!input.device) throw new BadRequestException({ code: 'DEVICE_REQUIRED' });
+    const info = input.device;
+    const refresh = this.support.newRefreshToken();
+    return this.db.transaction(async (tx) => {
+      const outcome = await this.support.consumeOtp(tx, input.challengeId, input.code, 'LOGIN_FALLBACK');
+      if (!outcome.ok || !outcome.userId) throw new BadRequestException({ code: 'OTP_INVALID' });
+      const [user] = await tx.orm
+        .select({ id: appUser.id, accountStatus: appUser.accountStatus, isStaff: appUser.isStaff })
+        .from(appUser)
+        .where(and(eq(appUser.id, outcome.userId), isNull(appUser.deletedAt)))
+        .for('no key update');
+      const lookup = sha256(outcome.phone);
+      if (!user || user.isStaff || user.accountStatus !== 'Active') {
+        await this.support.loginEvent(tx, { userId: outcome.userId, lookup, device: info, ip: input.ip, result: 'DENIED_POLICY', method: 'SMS_CODE' });
+        throw fail(HttpStatus.FORBIDDEN, 'ACCOUNT_NOT_ACTIVE');
+      }
+      const roles = await this.support.activeRoles(tx, outcome.userId);
+      const roleCode = input.role ?? roles[0];
+      if (!roleCode || !roles.includes(roleCode)) throw fail(HttpStatus.FORBIDDEN, 'ROLE_NOT_HELD');
+      await this.support.markSignedIn(tx, outcome.userId);
+      const opened = await this.support.openSession(tx, outcome.userId, roleCode, info, refresh, PUBLIC_REFRESH_DAYS);
+      await this.afterSignIn(tx, outcome.userId, roleCode, lookup, info, input.ip, 'SMS_CODE', opened);
+      return opened.pair;
+    });
   }
 
   async setPassword(input: { setupToken: string; password: string; device: DeviceInfo; ip?: string }): Promise<TokenPair> {
@@ -119,280 +148,286 @@ export class AuthService {
     if (problems.length) throw new BadRequestException({ code: 'PASSWORD_REJECTED', problems });
 
     const hash = await this.passwords.hash(input.password);
-    const refresh = this.newRefreshToken();
+    const refresh = this.support.newRefreshToken();
+    const roleCode = claims.role as RoleCode;
+    const phone = claims.phone;
     return this.db.transaction(async (tx) => {
-      const existing = await tx.query('SELECT 1 FROM idn.app_user WHERE phone_e164 = $1 AND deleted_at IS NULL', [claims.phone]);
-      if (existing.rows.length) throw new ConflictException({ code: 'ACCOUNT_EXISTS' });
+      const [existing] = await tx.orm.select({ id: appUser.id }).from(appUser).where(and(eq(appUser.phoneE164, phone), isNull(appUser.deletedAt)));
+      if (existing) throw new ConflictException({ code: 'ACCOUNT_EXISTS' });
 
-      const user = await tx.query<{ id: string }>(
-        `INSERT INTO idn.app_user (phone_e164, phone_verified_at, preferred_language)
-         VALUES ($1, now(), $2) RETURNING id`,
-        [claims.phone, claims.lang === 'en' ? 'en' : 'bn'],
-      );
-      const userId = user.rows[0].id;
-      await tx.query(
-        `INSERT INTO idn.user_role (user_id, role_id, status, reason)
-         SELECT $1, id, 'Active', NULL FROM idn.role WHERE code = $2`,
-        [userId, claims.role],
-      );
-      await tx.query(
-        `INSERT INTO idn.credential (user_id, password_hash, hash_algorithm, hash_params, password_set_at)
-         VALUES ($1, $2, 'ARGON2ID', '{"memoryKiB":19456,"timeCost":2,"parallelism":1}'::jsonb, now())`,
-        [userId, hash],
-      );
-      const pair = await this.openSession(tx, userId, claims.role as string, input.device, refresh);
-      await this.outbox.append(tx, { aggregateType: 'APP_USER', aggregateId: userId, eventType: 'UserRegistered', payload: { role: claims.role } });
-      await this.audit.record(tx, {
-        category: 'DATA_CHANGE', action: 'CREATE', result: 'SUCCESS', actorUserId: userId,
-        actorRole: claims.role as 'DON' | 'PAT', entityType: 'app_user', entityId: userId, correlationId: randomUUID(),
+      const [user] = await tx.orm
+        .insert(appUser)
+        .values({ phoneE164: phone, phoneVerifiedAt: new Date(), preferredLanguage: claims.lang === 'en' ? 'en' : 'bn' })
+        .returning({ id: appUser.id });
+      const userId = user.id;
+      const [roleRow] = await tx.orm.select({ id: role.id }).from(role).where(eq(role.code, roleCode));
+      await tx.orm.insert(userRole).values({ userId, roleId: roleRow.id, status: 'Active', assignedAt: new Date() });
+      await tx.orm.insert(credential).values({ userId, passwordHash: hash, hashAlgorithm: 'ARGON2ID', hashParams: HASH_PARAMS, passwordSetAt: new Date() });
+      const opened = await this.support.openSession(tx, userId, roleCode, input.device, refresh, PUBLIC_REFRESH_DAYS);
+      await this.support.loginEvent(tx, {
+        userId, lookup: sha256(phone), device: input.device, ip: input.ip, result: 'SUCCESS', method: 'PASSWORD', sessionId: opened.sessionId, deviceId: opened.deviceId, isNewDevice: true,
       });
-      return pair;
+      await this.outbox.append(tx, { aggregateType: 'APP_USER', aggregateId: userId, eventType: 'UserRegistered', payload: { role: roleCode } });
+      await this.outbox.append(tx, { aggregateType: 'APP_USER', aggregateId: userId, eventType: 'DeviceBound', payload: { deviceId: opened.deviceId, platform: input.device.platform } });
+      await this.audit.record(tx, {
+        category: 'DATA_CHANGE', action: 'CREATE', result: 'SUCCESS', actorUserId: userId, actorRole: roleCode,
+        entityType: 'app_user', entityId: userId, correlationId: randomUUID(),
+      });
+      return opened.pair;
     });
   }
 
-  async login(input: { phone: string; password: string; device: DeviceInfo; role?: string; ip?: string }): Promise<TokenPair | MfaChallenge> {
+  async login(input: { phone: string; password: string; device: DeviceInfo; role?: string; ip?: string; staffOnly?: boolean; mfaTrustDays?: number }): Promise<TokenPair | MfaChallenge> {
+    if (await this.support.loginRateLimited(this.db, input.ip)) throw fail(HttpStatus.TOO_MANY_REQUESTS, 'LOGIN_RATE_LIMITED');
     const phone = normalizeBdPhone(input.phone);
     const lookup = sha256(phone ?? input.phone);
-    const user = phone
-      ? (
-          await this.db.query<{ id: string; account_status: string; is_staff: boolean; password_hash: string; locked_until: Date | null; failed_attempts: number; lock_count_24h: number }>(
-            `SELECT u.id, u.account_status, u.is_staff, c.password_hash, c.locked_until, c.failed_attempts, c.lock_count_24h
-               FROM idn.app_user u JOIN idn.credential c ON c.user_id = u.id
-              WHERE u.phone_e164 = $1 AND u.deleted_at IS NULL`,
-            [phone],
-          )
-        ).rows[0]
-      : undefined;
+    const user = phone ? await this.credential(this.db, phone) : undefined;
 
     if (!user) {
       await this.passwords.verify(await this.getDummyHash(), input.password).catch(() => false);
-      await this.loginEvent(this.db, null, lookup, input, 'FAILED_PASSWORD');
+      await this.support.loginEvent(this.db, { userId: null, lookup, device: input.device, ip: input.ip, result: 'FAILED_PASSWORD', method: 'PASSWORD' });
+      await this.support.recordLoginFailure(this.db, null, 'UNKNOWN_NUMBER');
       throw new UnauthorizedException({ code: 'INVALID_CREDENTIALS' });
     }
-    if (user.locked_until && user.locked_until.getTime() > Date.now()) {
-      await this.loginEvent(this.db, user.id, lookup, input, 'LOCKED');
-      throw fail(HttpStatus.LOCKED, 'ACCOUNT_LOCKED');
+    if (user.lockedUntil && user.lockedUntil.getTime() > Date.now()) {
+      await this.support.loginEvent(this.db, { userId: user.id, lookup, device: input.device, ip: input.ip, result: 'LOCKED', method: 'PASSWORD' });
+      await this.support.recordLoginFailure(this.db, user.id, 'LOCKED');
+      throw new UnauthorizedException({ code: 'INVALID_CREDENTIALS' });
     }
 
-    const valid = await this.passwords.verify(user.password_hash, input.password).catch(() => false);
+    const valid = await this.passwords.verify(user.passwordHash, input.password).catch(() => false);
     if (!valid) {
-      const failures = user.failed_attempts + 1;
-      const lock = failures >= LOCK_AFTER_FAILURES;
-      const minutes = Math.min(LOCK_BASE_MINUTES * 2 ** user.lock_count_24h, LOCK_MAX_MINUTES);
-      await this.db.query(
-        `UPDATE idn.credential SET failed_attempts = $2, lock_count_24h = lock_count_24h + $3,
-                locked_until = CASE WHEN $3 = 1 THEN now() + make_interval(mins => $4) ELSE locked_until END, updated_at = now()
-          WHERE user_id = $1`,
-        [user.id, lock ? 0 : failures, lock ? 1 : 0, minutes],
-      );
-      await this.loginEvent(this.db, user.id, lookup, input, 'FAILED_PASSWORD');
+      await this.registerFailure(user, lookup, input);
       throw new UnauthorizedException({ code: 'INVALID_CREDENTIALS' });
     }
-    if (user.account_status !== 'Active') {
-      await this.loginEvent(this.db, user.id, lookup, input, 'DENIED_POLICY');
+    if (user.accountStatus !== 'Active') {
+      await this.support.loginEvent(this.db, { userId: user.id, lookup, device: input.device, ip: input.ip, result: 'DENIED_POLICY', method: 'PASSWORD' });
+      await this.support.recordLoginFailure(this.db, user.id, 'ACCOUNT_NOT_ACTIVE');
       throw fail(HttpStatus.FORBIDDEN, 'ACCOUNT_NOT_ACTIVE');
     }
-    if (user.is_staff && !(await this.deviceIsMfaTrusted(user.id, input.device.installId))) {
+    if (input.staffOnly && !user.isStaff) {
+      await this.support.loginEvent(this.db, { userId: user.id, lookup, device: input.device, ip: input.ip, result: 'DENIED_POLICY', method: 'PASSWORD' });
+      await this.support.recordLoginFailure(this.db, user.id, 'STAFF_ONLY');
+      throw fail(HttpStatus.FORBIDDEN, 'STAFF_ONLY');
+    }
+    if (user.isStaff && !this.skipStaffSmsCode && !(await this.deviceIsMfaTrusted(user.id, input.device.installId, input.mfaTrustDays ?? STAFF_MFA_DAYS))) {
       return this.startStaffMfa(user.id, phone!, input.ip);
     }
 
-    const refresh = this.newRefreshToken();
+    const refresh = this.support.newRefreshToken();
     return this.db.transaction(async (tx) => {
-      const roles = await tx.query<{ code: string }>(
-        `SELECT r.code FROM idn.user_role ur JOIN idn.role r ON r.id = ur.role_id
-          WHERE ur.user_id = $1 AND ur.status = 'Active' ORDER BY r.code`,
-        [user.id],
-      );
-      const role = input.role ?? roles.rows[0]?.code;
-      if (!role || !roles.rows.some((r) => r.code === role)) throw fail(HttpStatus.FORBIDDEN, 'ROLE_NOT_HELD');
-      await tx.query('UPDATE idn.credential SET failed_attempts = 0, last_login_at = now(), updated_at = now() WHERE user_id = $1', [user.id]);
-      await tx.query('UPDATE idn.app_user SET last_login_at = now(), updated_at = now() WHERE id = $1', [user.id]);
-      const pair = await this.openSession(tx, user.id, role, input.device, refresh, user.is_staff ? STAFF_REFRESH_DAYS : PUBLIC_REFRESH_DAYS);
-      await this.loginEvent(tx, user.id, lookup, input, 'SUCCESS');
-      await this.audit.record(tx, {
-        category: 'AUTH', action: 'LOGIN_SUCCESS', result: 'SUCCESS', actorUserId: user.id,
-        actorRole: role as 'DON' | 'PAT' | 'SUP' | 'MOD' | 'ADM', correlationId: randomUUID(),
-      });
-      return pair;
+      const roles = await this.support.activeRoles(tx, user.id);
+      const roleCode = (input.role ?? roles[0]) as RoleCode | undefined;
+      if (!roleCode || !roles.includes(roleCode)) throw fail(HttpStatus.FORBIDDEN, 'ROLE_NOT_HELD');
+      await this.support.markSignedIn(tx, user.id);
+      const opened = await this.support.openSession(tx, user.id, roleCode, input.device, refresh, user.isStaff ? STAFF_REFRESH_DAYS : PUBLIC_REFRESH_DAYS);
+      await this.afterSignIn(tx, user.id, roleCode, lookup, input.device, input.ip, 'PASSWORD', opened);
+      return opened.pair;
     });
   }
 
-  async verifyStaffMfa(input: { challengeId: string; code: string; device: DeviceInfo; role?: string; ip?: string }): Promise<TokenPair> {
-    const outcome = await this.db.transaction(async (tx) => {
-      const { rows } = await tx.query<{ user_id: string; phone_e164: string; code_hash: string; attempts: number; expired: boolean; consumed_at: Date | null }>(
-        `SELECT user_id, phone_e164, code_hash, attempts, consumed_at, expires_at <= now() AS expired
-           FROM idn.otp_challenge WHERE id = $1 AND purpose = 'STAFF_MFA' FOR UPDATE`,
-        [input.challengeId],
-      );
-      const row = rows[0];
-      if (!row || !row.user_id || row.consumed_at || row.expired || row.attempts >= OTP_MAX_ATTEMPTS) return { ok: false as const };
-      if (!otpMatches(input.challengeId, input.code, row.code_hash)) {
-        await tx.query('UPDATE idn.otp_challenge SET attempts = attempts + 1 WHERE id = $1', [input.challengeId]);
-        return { ok: false as const };
-      }
-      await tx.query('UPDATE idn.otp_challenge SET consumed_at = now() WHERE id = $1', [input.challengeId]);
-      return { ok: true as const, userId: row.user_id, phone: row.phone_e164 };
-    });
-    if (!outcome.ok) throw new BadRequestException({ code: 'OTP_INVALID' });
+  async verifyStaffMfa(input: { challengeId: string; code: string; device: DeviceInfo; role?: string; ip?: string; trustDevice?: boolean }): Promise<TokenPair> {
+    const outcome = await this.db.transaction((tx) => this.support.consumeOtp(tx, input.challengeId, input.code, 'STAFF_MFA'));
+    if (!outcome.ok || !outcome.userId) throw new BadRequestException({ code: 'OTP_INVALID' });
+    const userId = outcome.userId;
 
-    const refresh = this.newRefreshToken();
+    const refresh = this.support.newRefreshToken();
     return this.db.transaction(async (tx) => {
-      const roles = await tx.query<{ code: string }>(
-        `SELECT r.code FROM idn.user_role ur JOIN idn.role r ON r.id = ur.role_id
-          WHERE ur.user_id = $1 AND ur.status = 'Active' AND r.is_staff ORDER BY r.code`,
-        [outcome.userId],
-      );
-      const role = input.role ?? roles.rows[0]?.code;
-      if (!role || !roles.rows.some((r) => r.code === role)) throw fail(HttpStatus.FORBIDDEN, 'ROLE_NOT_HELD');
-      const pair = await this.openSession(tx, outcome.userId, role, input.device, refresh, STAFF_REFRESH_DAYS);
-      await tx.query(
-        'UPDATE idn.device SET staff_mfa_verified_at = now() WHERE user_id = $1 AND install_id = $2',
-        [outcome.userId, input.device.installId],
-      );
-      await tx.query('UPDATE idn.credential SET failed_attempts = 0, last_login_at = now(), updated_at = now() WHERE user_id = $1', [outcome.userId]);
-      await tx.query('UPDATE idn.app_user SET last_login_at = now(), updated_at = now() WHERE id = $1', [outcome.userId]);
-      await this.loginEvent(tx, outcome.userId, sha256(outcome.phone), input, 'SUCCESS', 'STAFF_2STEP');
-      await this.audit.record(tx, {
-        category: 'AUTH', action: 'LOGIN_SUCCESS', result: 'SUCCESS', actorUserId: outcome.userId,
-        actorRole: role as 'SUP' | 'MOD' | 'ADM', correlationId: randomUUID(),
-      });
-      return pair;
+      const roles = await this.support.activeRoles(tx, userId, true);
+      const roleCode = (input.role ?? roles[0]) as RoleCode | undefined;
+      if (!roleCode || !roles.includes(roleCode)) throw fail(HttpStatus.FORBIDDEN, 'ROLE_NOT_HELD');
+      const opened = await this.support.openSession(tx, userId, roleCode, input.device, refresh, STAFF_REFRESH_DAYS);
+      await tx.orm
+        .update(device)
+        .set({ staffMfaVerifiedAt: input.trustDevice ?? true ? new Date() : null, updatedAt: new Date() })
+        .where(eq(device.id, opened.deviceId));
+      await this.support.markSignedIn(tx, userId);
+      await this.afterSignIn(tx, userId, roleCode, sha256(outcome.phone), input.device, input.ip, 'STAFF_2STEP', opened);
+      return opened.pair;
     });
   }
 
-  async refresh(refreshToken: string): Promise<TokenPair> {
+  async refresh(refreshToken: string, proof?: DeviceProof): Promise<TokenPair> {
     const hash = sha256(refreshToken);
     const result = await this.db.transaction(async (tx) => {
-      const { rows } = await tx.query<{ id: string; user_id: string; device_id: string; active_role: string; revoked: boolean; expired: boolean; superseded: boolean }>(
-        `SELECT s.id, s.user_id, s.device_id, s.active_role, s.revoked_at IS NOT NULL AS revoked, s.expires_at <= now() AS expired,
-                EXISTS (SELECT 1 FROM idn.session c WHERE c.rotated_from_id = s.id) AS superseded
-           FROM idn.session s WHERE s.refresh_token_hash = $1 FOR UPDATE`,
-        [hash],
-      );
-      const session = rows[0];
-      if (!session || session.revoked || session.expired) return { ok: false as const };
-      if (session.superseded) {
-        await tx.query(
-          `UPDATE idn.session SET revoked_at = now(), revoke_reason = 'ROTATION_REUSE'
-            WHERE device_id = $1 AND revoked_at IS NULL`,
-          [session.device_id],
-        );
-        return { ok: false as const };
+      const [current] = await tx.orm
+        .select({
+          id: session.id, userId: session.userId, deviceId: session.deviceId, activeRole: session.activeRole, expiresAt: session.expiresAt, stepUpAt: session.stepUpAt,
+          revoked: sql<boolean>`${session.revokedAt} is not null`, expired: sql<boolean>`${session.expiresAt} <= now()`,
+          superseded: exists(tx.orm.select({ one: sql`1` }).from(sql`idn.session c`).where(sql`c.rotated_from_id = ${session.id}`)),
+          publicKey: device.publicKey, deviceStatus: device.signOutStatus, accountStatus: appUser.accountStatus, deleted: sql<boolean>`${appUser.deletedAt} is not null`,
+        })
+        .from(session)
+        .innerJoin(device, eq(device.id, session.deviceId))
+        .innerJoin(appUser, eq(appUser.id, session.userId))
+        .where(eq(session.refreshTokenHash, hash))
+        .for('no key update');
+      if (!current || current.revoked || current.expired) return { ok: false as const, code: 'REFRESH_INVALID' };
+      if (current.superseded) {
+        await this.support.revokeSessions(tx, current.userId, 'ROTATION_REUSE', { userId: null, role: 'SYSTEM' }, { deviceId: current.deviceId });
+        return { ok: false as const, code: 'REFRESH_INVALID' };
       }
-      const next = this.newRefreshToken();
-      const created = await tx.query<{ id: string }>(
-        `INSERT INTO idn.session (user_id, device_id, refresh_token_hash, rotated_from_id, active_role, expires_at)
-         SELECT user_id, device_id, $2, id, active_role, expires_at FROM idn.session WHERE id = $1 RETURNING id`,
-        [session.id, next.hash],
-      );
-      return { ok: true as const, pair: this.pair(session.user_id, created.rows[0].id, session.active_role, next.token) };
+      if (current.publicKey && !(proof && verifyDeviceProof(current.publicKey, 'refresh', refreshToken, proof))) {
+        return { ok: false as const, code: 'DEVICE_PROOF_INVALID' };
+      }
+      if (current.accountStatus !== 'Active' || current.deleted) {
+        await this.support.revokeSessions(tx, current.userId, 'ACCOUNT_SUSPENDED', { userId: null, role: 'SYSTEM' });
+        return { ok: false as const, code: 'REFRESH_INVALID' };
+      }
+      if (current.deviceStatus !== 'Active') {
+        await this.support.revokeSessions(tx, current.userId, 'DEVICE_REVOKED', { userId: null, role: 'SYSTEM' }, { deviceId: current.deviceId });
+        return { ok: false as const, code: 'REFRESH_INVALID' };
+      }
+      const next = this.support.newRefreshToken();
+      const [created] = await tx.orm
+        .insert(session)
+        .values({ userId: current.userId, deviceId: current.deviceId, refreshTokenHash: next.hash, rotatedFromId: current.id, activeRole: current.activeRole, expiresAt: current.expiresAt, stepUpAt: current.stepUpAt })
+        .returning({ id: session.id });
+      await tx.orm.update(device).set({ lastSeenAt: new Date(), updatedAt: new Date() }).where(eq(device.id, current.deviceId));
+      return { ok: true as const, pair: this.support.pair(current.userId, created.id, current.activeRole, next.token) };
     });
-    if (!result.ok) throw new UnauthorizedException({ code: 'REFRESH_INVALID' });
+    if (!result.ok) throw new UnauthorizedException({ code: result.code });
     return result.pair;
   }
 
-  async logout(sessionId: string, userId: string, role: string): Promise<void> {
+  async logoutByRefreshToken(refreshToken: string): Promise<void> {
+    const [row] = await this.db.orm
+      .select({ id: session.id, userId: session.userId, activeRole: session.activeRole })
+      .from(session)
+      .where(and(eq(session.refreshTokenHash, sha256(refreshToken)), isNull(session.revokedAt)));
+    if (row) await this.logout(row.id, row.userId, row.activeRole);
+  }
+
+  async logout(sessionId: string, userId: string, roleCode: string): Promise<void> {
     await this.db.transaction(async (tx) => {
-      await tx.query(
-        `UPDATE idn.session SET revoked_at = now(), revoke_reason = 'LOGOUT' WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL`,
-        [sessionId, userId],
-      );
+      await tx.orm
+        .update(session)
+        .set({ revokedAt: new Date(), revokeReason: 'LOGOUT', updatedAt: new Date() })
+        .where(and(eq(session.id, sessionId), eq(session.userId, userId), isNull(session.revokedAt)));
       await this.audit.record(tx, {
         category: 'AUTH', action: 'LOGOUT', result: 'SUCCESS', actorUserId: userId,
-        actorRole: role as 'DON' | 'PAT' | 'SUP' | 'MOD' | 'ADM', correlationId: randomUUID(),
+        actorRole: roleCode as RoleCode, correlationId: randomUUID(),
       });
     });
   }
 
-  async loadGrants(userId: string, role: string): Promise<Grant[]> {
-    const { rows } = await this.db.query<{ key: string; scope: PermissionScope; expires_at: Date | null }>(
-      `SELECT p.key, i.scope, NULL::timestamptz AS expires_at
-         FROM idn.permission_set s
-         JOIN idn.permission_set_item i ON i.permission_set_id = s.id
-         JOIN idn.permission p ON p.id = i.permission_id
-        WHERE s.kind = 'BASE' AND s.status = 'Active' AND s.role_code = $2
-       UNION ALL
-       SELECT key, scope, expires_at FROM idn.v_effective_permission WHERE user_id = $1`,
-      [userId, role],
-    );
-    return rows.map((r) => ({ key: r.key, scope: r.scope, expiresAt: r.expires_at }));
+  async loadGrants(userId: string, roleCode: string): Promise<Grant[]> {
+    const allowed = sql`${roleCode}::role_code = any (${permission.allowedRoles})`;
+    const base = this.db.orm
+      .select({ key: permission.key, scope: permissionSetItem.scope, requiresStepUp: permission.requiresStepUp, expiresAt: sql<Date | null>`null::timestamptz`.as('expires_at') })
+      .from(permissionSet)
+      .innerJoin(permissionSetItem, eq(permissionSetItem.permissionSetId, permissionSet.id))
+      .innerJoin(permission, eq(permission.id, permissionSetItem.permissionId))
+      .where(and(eq(permissionSet.kind, 'BASE'), eq(permissionSet.status, 'Active'), eq(permissionSet.roleCode, roleCode as RoleCode), allowed));
+    const granted = this.db.orm
+      .select({ key: permission.key, scope: permissionSetItem.scope, requiresStepUp: permission.requiresStepUp, expiresAt: sql<Date | null>`${userPermissionSet.expiresAt}`.as('expires_at') })
+      .from(userPermissionSet)
+      .innerJoin(permissionSet, and(eq(permissionSet.id, userPermissionSet.permissionSetId), eq(permissionSet.status, 'Active'), eq(permissionSet.roleCode, roleCode as RoleCode)))
+      .innerJoin(permissionSetItem, eq(permissionSetItem.permissionSetId, permissionSet.id))
+      .innerJoin(permission, eq(permission.id, permissionSetItem.permissionId))
+      .where(
+        and(
+          eq(userPermissionSet.userId, userId), eq(userPermissionSet.status, 'Active'), sql`${userPermissionSet.effectiveFrom} <= now()`,
+          sql`(${userPermissionSet.expiresAt} is null or ${userPermissionSet.expiresAt} > now())`, allowed,
+        ),
+      );
+    const rows = await base.unionAll(granted);
+    return rows.map((r) => ({ key: r.key, scope: r.scope as PermissionScope, expiresAt: r.expiresAt, requiresStepUp: r.requiresStepUp }));
   }
 
-  async sessionIsActive(sessionId: string, userId: string): Promise<boolean> {
-    const { rows } = await this.db.query(
-      `SELECT 1 FROM idn.session s JOIN idn.app_user u ON u.id = s.user_id
-        WHERE s.id = $1 AND s.user_id = $2 AND s.revoked_at IS NULL AND s.expires_at > now() AND u.account_status = 'Active'`,
-      [sessionId, userId],
-    );
-    return rows.length > 0;
+  async resolveSession(sessionId: string, userId: string, roleCode: string): Promise<SessionState | null> {
+    const [row] = await this.db.orm
+      .select({ stepUpAt: session.stepUpAt, deviceId: session.deviceId })
+      .from(session)
+      .innerJoin(appUser, eq(appUser.id, session.userId))
+      .innerJoin(device, eq(device.id, session.deviceId))
+      .where(
+        and(
+          eq(session.id, sessionId), eq(session.userId, userId), eq(session.activeRole, roleCode as RoleCode), isNull(session.revokedAt), gt(session.expiresAt, sql`now()`),
+          eq(appUser.accountStatus, 'Active'), isNull(appUser.deletedAt), eq(device.signOutStatus, 'Active'),
+        ),
+      );
+    return row ? { stepUpAt: row.stepUpAt, deviceId: row.deviceId } : null;
   }
 
-  private async deviceIsMfaTrusted(userId: string, installId: string): Promise<boolean> {
-    const { rows } = await this.db.query(
-      `SELECT 1 FROM idn.device WHERE user_id = $1 AND install_id = $2 AND sign_out_status = 'Active'
-          AND staff_mfa_verified_at > now() - make_interval(days => $3)`,
-      [userId, installId, STAFF_MFA_DAYS],
-    );
-    return rows.length > 0;
+  async sessionIsActive(sessionId: string, userId: string, roleCode: string): Promise<boolean> {
+    return (await this.resolveSession(sessionId, userId, roleCode)) !== null;
+  }
+
+  private async credential(db: Db, phone: string): Promise<CredentialRow | undefined> {
+    const [row] = await db.orm
+      .select({
+        id: appUser.id, accountStatus: appUser.accountStatus, isStaff: appUser.isStaff, passwordHash: credential.passwordHash,
+        lockedUntil: credential.lockedUntil, failedAttempts: credential.failedAttempts, lockCount24h: credential.lockCount24h,
+      })
+      .from(appUser)
+      .innerJoin(credential, eq(credential.userId, appUser.id))
+      .where(and(eq(appUser.phoneE164, phone), isNull(appUser.deletedAt)));
+    return row;
+  }
+
+  private async registerFailure(user: CredentialRow, lookup: string, input: { device: DeviceInfo; ip?: string }) {
+    const failures = user.failedAttempts + 1;
+    const lock = failures >= LOCK_AFTER_FAILURES;
+    const minutes = Math.min(LOCK_BASE_MINUTES * 2 ** user.lockCount24h, LOCK_MAX_MINUTES);
+    await this.db.transaction(async (tx) => {
+      await tx.orm
+        .update(credential)
+        .set({
+          failedAttempts: lock ? 0 : failures,
+          lockCount24h: lock ? sql`${credential.lockCount24h} + 1` : credential.lockCount24h,
+          lockedUntil: lock ? minutesFromNow(minutes) : credential.lockedUntil,
+          updatedAt: new Date(),
+        })
+        .where(eq(credential.userId, user.id));
+      await this.support.loginEvent(tx, {
+        userId: user.id, lookup, device: input.device, ip: input.ip, result: 'FAILED_PASSWORD', method: 'PASSWORD', riskFlags: lock ? ['MANY_FAILURES'] : [],
+      });
+      await this.support.recordLoginFailure(tx, user.id, 'WRONG_PASSWORD');
+      if (lock) {
+        const roleCode = (await this.support.activeRoles(tx, user.id))[0] ?? 'DON';
+        await this.audit.record(tx, {
+          category: 'AUTH', action: 'ACCOUNT_LOCKED', result: 'SUCCESS', actorUserId: null, actorRole: 'SYSTEM', subjectUserId: user.id,
+          reasonCode: 'MANY_FAILURES', changes: { minutes }, correlationId: randomUUID(),
+        });
+        await this.outbox.append(tx, { aggregateType: 'APP_USER', aggregateId: user.id, eventType: 'AccountLocked', payload: { minutes } });
+        await this.support.securityAlert(tx, user.id, roleCode, 'ACCOUNT_LOCKED', { minutes });
+      }
+    });
+  }
+
+  private async afterSignIn(
+    tx: Db, userId: string, roleCode: RoleCode, lookup: string, info: DeviceInfo, ip: string | undefined,
+    method: 'PASSWORD' | 'SMS_CODE' | 'STAFF_2STEP', opened: { sessionId: string; deviceId: string; isNewDevice: boolean },
+  ) {
+    await this.support.loginEvent(tx, {
+      userId, lookup, device: info, ip, result: 'SUCCESS', method, sessionId: opened.sessionId, deviceId: opened.deviceId,
+      isNewDevice: opened.isNewDevice, riskFlags: opened.isNewDevice ? ['NEW_DEVICE'] : [],
+    });
+    await this.support.recordLoginSuccess(tx, userId, roleCode);
+    if (opened.isNewDevice) {
+      await this.outbox.append(tx, { aggregateType: 'APP_USER', aggregateId: userId, eventType: 'SignedInNewDevice', payload: { deviceId: opened.deviceId, platform: info.platform } });
+      await this.support.securityAlert(tx, userId, roleCode, 'NEW_DEVICE', { deviceModel: info.model, platform: info.platform });
+    }
+  }
+
+  private async deviceIsMfaTrusted(userId: string, installId: string, days: number): Promise<boolean> {
+    if (days <= 0) return false;
+    const [row] = await this.db.orm
+      .select({ id: device.id })
+      .from(device)
+      .where(
+        and(
+          eq(device.userId, userId), eq(device.installId, installId), eq(device.signOutStatus, 'Active'),
+          gt(device.staffMfaVerifiedAt, sql`now() - make_interval(days => ${days}::int)`),
+        ),
+      );
+    return row !== undefined;
   }
 
   private async startStaffMfa(userId: string, phone: string, ip?: string): Promise<MfaChallenge> {
-    const recent = await this.db.query<{ n: number }>(
-      `SELECT count(*)::int AS n FROM idn.otp_challenge
-        WHERE phone_e164 = $1 AND purpose = 'STAFF_MFA' AND created_at > now() - interval '15 minutes'`,
-      [phone],
-    );
-    if (recent.rows[0].n >= OTP_REQUESTS_PER_15_MIN) throw fail(HttpStatus.TOO_MANY_REQUESTS, 'OTP_RATE_LIMITED');
-    const challengeId = randomUUID();
-    const code = generateOtp();
-    await this.db.query(
-      `INSERT INTO idn.otp_challenge (id, phone_e164, user_id, purpose, code_hash, expires_at, request_ip)
-       VALUES ($1, $2, $3, 'STAFF_MFA', $4, now() + make_interval(secs => $5), $6)`,
-      [challengeId, phone, userId, hashOtp(challengeId, code), OTP_TTL_SECONDS, ip ?? null],
-    );
-    await this.sms.send(phone, `BBDA code: ${code}`);
-    return { mfaRequired: true, challengeId, expiresInSeconds: OTP_TTL_SECONDS };
-  }
-
-  private newRefreshToken() {
-    const token = randomBytes(32).toString('base64url');
-    return { token, hash: sha256(token) };
-  }
-
-  private pair(userId: string, sessionId: string, role: string, refreshToken: string): TokenPair {
-    return {
-      accessToken: this.tokens.issue('access', { sub: userId, sid: sessionId, role }, ACCESS_TTL_SECONDS),
-      refreshToken,
-      expiresIn: ACCESS_TTL_SECONDS,
-      role,
-    };
-  }
-
-  private async openSession(tx: Db, userId: string, role: string, device: DeviceInfo, refresh: { token: string; hash: string }, refreshDays = PUBLIC_REFRESH_DAYS): Promise<TokenPair> {
-    const dev = await tx.query<{ id: string }>(
-      `INSERT INTO idn.device (user_id, install_id, platform, device_model, os_version, app_version, is_rooted)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       ON CONFLICT (user_id, install_id) DO UPDATE
-         SET device_model = EXCLUDED.device_model, os_version = EXCLUDED.os_version, app_version = EXCLUDED.app_version,
-             is_rooted = EXCLUDED.is_rooted, last_seen_at = now(), sign_out_status = 'Active', updated_at = now()
-       RETURNING id`,
-      [userId, device.installId, device.platform, device.model, device.osVersion, device.appVersion, device.isRooted ?? false],
-    );
-    const session = await tx.query<{ id: string }>(
-      `INSERT INTO idn.session (user_id, device_id, refresh_token_hash, active_role, expires_at)
-       VALUES ($1, $2, $3, $4, now() + make_interval(days => $5)) RETURNING id`,
-      [userId, dev.rows[0].id, refresh.hash, role, refreshDays],
-    );
-    return this.pair(userId, session.rows[0].id, role, refresh.token);
-  }
-
-  private async loginEvent(db: Db, userId: string | null, lookup: string, input: { device: DeviceInfo; ip?: string }, result: string, method = 'PASSWORD') {
-    await db.query(
-      `INSERT INTO idn.login_event (user_id, phone_lookup_hash, method, result, device_model, os_version, app_version, is_rooted,
-                                   ip_hash, location_source, risk_flags)
-       VALUES ($1, $2, $9, $3, $4, $5, $6, $7, $8, 'NOT_SHARED', '{}')`,
-      [userId, lookup, result, input.device.model, input.device.osVersion, input.device.appVersion, input.device.isRooted ?? false, input.ip ? sha256(input.ip) : null, method],
-    );
+    const { challengeId, expiresInSeconds } = await this.support.issueOtp(this.db, { phone, purpose: 'STAFF_MFA', userId, ip });
+    return { mfaRequired: true, challengeId, expiresInSeconds };
   }
 
   private getDummyHash(): Promise<string> {

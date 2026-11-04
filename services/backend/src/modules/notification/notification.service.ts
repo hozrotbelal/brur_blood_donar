@@ -1,178 +1,204 @@
 import { HttpException, HttpStatus, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { and, count, desc, eq, inArray, isNotNull, isNull, ne, notInArray, sql } from 'drizzle-orm';
 import { Db, DatabaseService } from '../../platform/db/database.service';
 import { staffAreaIds } from '../../platform/policy/area-scope';
 import { Principal } from '../../platform/policy/policy.types';
-import { EnqueueInput, Lang, Vars } from './notification.types';
+import { setPushToken } from '../identity/identity.public';
+import { preferredLanguage } from '../identity/read-model.public';
+import { requestRouting } from '../request/read-model.public';
+import { categoryOf, EnqueueInput, Lang, Vars } from './notification.types';
+import { deliveryAttempt, notification, notificationEvent, notificationRule, notificationTemplate, templateVersion } from './schema';
 import { render } from './template.renderer';
 
-interface RuleRow {
-  channels: string[];
-  is_critical: boolean;
-}
+export type EventCode = (typeof notificationEvent.$inferSelect)['eventCode'];
+type Channel = (typeof notification.$inferSelect)['channel'];
 
-const KEEP_ON_CLOSE = ['NTF-EV-09', 'NTF-EV-13', 'NTF-EV-18'];
+const KEEP_ON_CLOSE: EventCode[] = ['NTF-EV-09', 'NTF-EV-13', 'NTF-EV-18'];
+const REPORT_PAGE = 200;
 
 @Injectable()
 export class NotificationService {
   constructor(@Inject(DatabaseService) private readonly db: DatabaseService) {}
 
   async enqueue(tx: Db, input: EnqueueInput): Promise<number> {
-    const event = await tx.query<{ id: string }>(
-      `INSERT INTO ntf.notification_event (event_code, aggregate_type, aggregate_id, request_id, case_id, payload, source_outbox_event_id)
-       VALUES ($1::ntf_event_code, $2, $3, $4, $5, $6::jsonb, $7)
-       ON CONFLICT (source_outbox_event_id) DO UPDATE SET updated_at = now()
-       RETURNING id`,
-      [input.eventCode, input.aggregateType, input.aggregateId, input.requestId ?? null, input.caseId ?? null, JSON.stringify({ urgency: input.urgency ?? null, varsByLang: { bn: this.varsFor(input, 'bn'), en: this.varsFor(input, 'en') } }), input.sourceOutboxEventId ?? null],
-    );
-    const eventId = event.rows[0].id;
+    const eventCode = input.eventCode as EventCode;
+    const [event] = await tx.orm
+      .insert(notificationEvent)
+      .values({
+        eventCode, aggregateType: input.aggregateType, aggregateId: input.aggregateId, requestId: input.requestId ?? null, caseId: input.caseId ?? null,
+        payload: { urgency: input.urgency ?? null, varsByLang: { bn: this.varsFor(input, 'bn'), en: this.varsFor(input, 'en') } },
+        sourceOutboxEventId: input.sourceOutboxEventId ?? null,
+      })
+      .onConflictDoUpdate({ target: notificationEvent.sourceOutboxEventId, set: { updatedAt: sql`now()` } })
+      .returning({ id: notificationEvent.id });
     let created = 0;
     const seen = new Set<string>();
     for (const r of input.recipients) {
       const key = `${r.userId}:${r.role}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      const rule = await tx.query<RuleRow>(
-        'SELECT channels::text[] AS channels, is_critical FROM ntf.notification_rule WHERE event_code = $1::ntf_event_code AND recipient_role = $2::role_code AND enabled',
-        [input.eventCode, r.role],
-      );
-      if (!rule.rows[0]) continue;
-      const lang = await this.languageOf(tx, r.userId);
+      const [rule] = await tx.orm
+        .select({ channels: notificationRule.channels, isCritical: notificationRule.isCritical })
+        .from(notificationRule)
+        .where(and(eq(notificationRule.eventCode, eventCode), eq(notificationRule.recipientRole, r.role), eq(notificationRule.enabled, true)));
+      if (!rule) continue;
+      const lang = await preferredLanguage(tx, r.userId);
       if (!lang) continue;
       const vars = this.varsFor(input, lang);
-      const critical = rule.rows[0].is_critical || (input.eventCode === 'NTF-EV-04' && input.urgency === 'Critical');
-      for (const channel of rule.rows[0].channels.filter((c) => c !== 'SMS')) {
-        const text = await this.template(tx, input.eventCode, channel, lang);
+      const critical = rule.isCritical || (input.eventCode === 'NTF-EV-04' && input.urgency === 'Critical');
+      for (const channel of rule.channels.filter((c) => c !== 'SMS')) {
+        const text = await this.template(tx, eventCode, channel, lang);
         if (!text) continue;
-        const inserted = await tx.query(
-          `INSERT INTO ntf.notification
-             (notification_event_id, recipient_user_id, channel, template_version_id, language, request_id, case_id, invitation_id,
-              dedupe_key, is_critical, rendered_title, rendered_body, scheduled_for)
-           VALUES ($1, $2, $3::notification_channel, $4, $5::ui_language, $6, $7, $8, $9, $10, $11, $12, $13)
-           ON CONFLICT (dedupe_key) DO NOTHING`,
-          [
-            eventId, r.userId, channel, text.id, lang, input.requestId ?? null, input.caseId ?? null, input.invitationId ?? null,
-            `${input.dedupeBase}:${r.userId}:${channel}`, critical,
-            text.title ? render(text.title, vars) : null, render(text.body, vars), input.scheduledFor ?? new Date(),
-          ],
-        );
-        created += inserted.rowCount ?? 0;
+        const inserted = await tx.orm
+          .insert(notification)
+          .values({
+            notificationEventId: event.id, recipientUserId: r.userId, channel, templateVersionId: text.id, language: lang,
+            requestId: input.requestId ?? null, caseId: input.caseId ?? null, invitationId: input.invitationId ?? null,
+            dedupeKey: `${input.dedupeBase}:${r.userId}:${channel}`, isCritical: critical,
+            renderedTitle: text.title ? render(text.title, vars) : null, renderedBody: render(text.body, vars), scheduledFor: input.scheduledFor ?? new Date(),
+          })
+          .onConflictDoNothing({ target: notification.dedupeKey })
+          .returning({ id: notification.id });
+        created += inserted.length;
       }
     }
-    await tx.query(`UPDATE ntf.notification_event SET status = $2::ntf_event_status, updated_at = now() WHERE id = $1`, [eventId, created > 0 ? 'Processed' : 'Skipped']);
+    await tx.orm
+      .update(notificationEvent)
+      .set({ status: created > 0 ? 'Processed' : 'Skipped', updatedAt: sql`now()` })
+      .where(eq(notificationEvent.id, event.id));
     return created;
   }
 
   async cancelForRequest(tx: Db, requestId: string, reason: 'REQUEST_CLOSED' | 'OUTREACH_PAUSED' | 'SUPERSEDED' = 'REQUEST_CLOSED'): Promise<number> {
-    const res = await tx.query(
-      `UPDATE ntf.notification n SET status = 'Cancelled', cancel_reason = $3::notification_cancel_reason, cancelled_at = now(), version = version + 1, updated_at = now()
-         FROM ntf.notification_event e
-        WHERE n.notification_event_id = e.id AND n.request_id = $1 AND n.status IN ('Pending','Queued') AND NOT (e.event_code::text = ANY($2::text[]))`,
-      [requestId, KEEP_ON_CLOSE, reason],
-    );
-    return res.rowCount ?? 0;
+    const cancellable = tx.orm.select({ id: notificationEvent.id }).from(notificationEvent).where(notInArray(notificationEvent.eventCode, KEEP_ON_CLOSE));
+    const rows = await tx.orm
+      .update(notification)
+      .set({ status: 'Cancelled', cancelReason: reason, cancelledAt: sql`now()`, version: sql`${notification.version} + 1`, updatedAt: sql`now()` })
+      .where(and(eq(notification.requestId, requestId), inArray(notification.status, ['Pending', 'Queued']), inArray(notification.notificationEventId, cancellable)))
+      .returning({ id: notification.id });
+    return rows.length;
   }
 
   async inbox(principal: Principal, opts: { unreadOnly?: boolean; limit?: number } = {}) {
     const limit = Math.min(Math.max(opts.limit ?? 50, 1), 100);
-    const { rows } = await this.db.query<{ id: string; event_code: string; rendered_title: string | null; rendered_body: string | null; created_at: Date; read_at: Date | null; request_id: string | null; invitation_id: string | null; is_critical: boolean }>(
-      `SELECT n.id, e.event_code, n.rendered_title, n.rendered_body, n.created_at, n.read_at, n.request_id, n.invitation_id, n.is_critical
-         FROM ntf.notification n JOIN ntf.notification_event e ON e.id = n.notification_event_id
-        WHERE n.recipient_user_id = $1 AND n.channel = 'IN_APP' AND n.status IN ('Delivered','Read') ${opts.unreadOnly ? 'AND n.read_at IS NULL' : ''}
-        ORDER BY n.created_at DESC LIMIT $2`,
-      [principal.userId, limit],
-    );
-    return rows.map((r) => ({
-      id: r.id, eventCode: r.event_code, title: r.rendered_title, body: r.rendered_body, createdAt: r.created_at, read: r.read_at !== null,
-      requestId: r.request_id, invitationId: r.invitation_id, critical: r.is_critical,
+    const rows = await this.db.orm
+      .select({
+        id: notification.id, eventCode: notificationEvent.eventCode, title: notification.renderedTitle, body: notification.renderedBody,
+        createdAt: notification.createdAt, readAt: notification.readAt, requestId: notification.requestId, invitationId: notification.invitationId, critical: notification.isCritical,
+      })
+      .from(notification)
+      .innerJoin(notificationEvent, eq(notificationEvent.id, notification.notificationEventId))
+      .where(and(
+        eq(notification.recipientUserId, principal.userId), eq(notification.channel, 'IN_APP'), inArray(notification.status, ['Delivered', 'Read']),
+        opts.unreadOnly ? isNull(notification.readAt) : undefined,
+      ))
+      .orderBy(desc(notification.createdAt))
+      .limit(limit);
+    return rows.map(({ readAt, ...r }) => ({
+      id: r.id, eventCode: r.eventCode, category: categoryOf(r.eventCode), title: r.title, body: r.body, createdAt: r.createdAt, read: readAt !== null,
+      requestId: r.requestId, invitationId: r.invitationId, critical: r.critical,
     }));
   }
 
   async unreadCount(principal: Principal) {
-    const { rows } = await this.db.query<{ n: number }>(
-      `SELECT count(*)::int AS n FROM ntf.notification WHERE recipient_user_id = $1 AND channel = 'IN_APP' AND status = 'Delivered' AND read_at IS NULL`,
-      [principal.userId],
-    );
-    return { unread: rows[0].n };
+    const [row] = await this.db.orm
+      .select({ n: count() })
+      .from(notification)
+      .where(and(eq(notification.recipientUserId, principal.userId), eq(notification.channel, 'IN_APP'), eq(notification.status, 'Delivered'), isNull(notification.readAt)));
+    return { unread: row.n };
   }
 
   async markRead(principal: Principal, id: string) {
-    const res = await this.db.query(
-      `UPDATE ntf.notification SET status = 'Read', read_at = COALESCE(read_at, now()), delivered_at = COALESCE(delivered_at, now()), version = version + 1, updated_at = now()
-        WHERE id = $1 AND recipient_user_id = $2 AND status IN ('Sent','Delivered','Read')`,
-      [id, principal.userId],
-    );
-    if (!res.rowCount) throw new NotFoundException({ code: 'NOTIFICATION_NOT_FOUND' });
-    await this.markCompanionsRead(id);
+    const rows = await this.db.orm
+      .update(notification)
+      .set({
+        status: 'Read', readAt: sql`COALESCE(${notification.readAt}, now())`, deliveredAt: sql`COALESCE(${notification.deliveredAt}, now())`,
+        version: sql`${notification.version} + 1`, updatedAt: sql`now()`,
+      })
+      .where(and(eq(notification.id, id), eq(notification.recipientUserId, principal.userId), inArray(notification.status, ['Sent', 'Delivered', 'Read'])))
+      .returning({ eventId: notification.notificationEventId });
+    if (!rows[0]) throw new NotFoundException({ code: 'NOTIFICATION_NOT_FOUND' });
+    await this.markCompanionsRead(id, rows[0].eventId, principal.userId);
     return { id, read: true };
   }
 
   async markAllRead(principal: Principal) {
-    const res = await this.db.query(
-      `UPDATE ntf.notification SET status = 'Read', read_at = now(), version = version + 1, updated_at = now()
-        WHERE recipient_user_id = $1 AND channel = 'IN_APP' AND status = 'Delivered'`,
-      [principal.userId],
-    );
-    return { updated: res.rowCount ?? 0 };
+    const rows = await this.db.orm
+      .update(notification)
+      .set({ status: 'Read', readAt: sql`now()`, version: sql`${notification.version} + 1`, updatedAt: sql`now()` })
+      .where(and(eq(notification.recipientUserId, principal.userId), eq(notification.channel, 'IN_APP'), eq(notification.status, 'Delivered')))
+      .returning({ id: notification.id });
+    return { updated: rows.length };
   }
 
   async receipt(principal: Principal, id: string) {
-    const res = await this.db.query(
-      `UPDATE ntf.notification SET status = CASE WHEN status = 'Sent' THEN 'Delivered'::notification_status ELSE status END, delivered_at = COALESCE(delivered_at, now()), updated_at = now()
-        WHERE id = $1 AND recipient_user_id = $2 AND channel = 'PUSH' AND status IN ('Sent','Delivered','Read')`,
-      [id, principal.userId],
-    );
-    if (!res.rowCount) throw new NotFoundException({ code: 'NOTIFICATION_NOT_FOUND' });
+    const rows = await this.db.orm
+      .update(notification)
+      .set({
+        status: sql`CASE WHEN ${notification.status} = 'Sent' THEN 'Delivered'::notification_status ELSE ${notification.status} END`,
+        deliveredAt: sql`COALESCE(${notification.deliveredAt}, now())`, updatedAt: sql`now()`,
+      })
+      .where(and(eq(notification.id, id), eq(notification.recipientUserId, principal.userId), eq(notification.channel, 'PUSH'), inArray(notification.status, ['Sent', 'Delivered', 'Read'])))
+      .returning({ id: notification.id });
+    if (!rows[0]) throw new NotFoundException({ code: 'NOTIFICATION_NOT_FOUND' });
     return { id, delivered: true };
   }
 
   async registerPushToken(principal: Principal, installId: string, token: string) {
-    const res = await this.db.query(
-      `UPDATE idn.device SET push_token = $3, last_seen_at = now(), updated_at = now() WHERE user_id = $1 AND install_id = $2 AND sign_out_status = 'Active'`,
-      [principal.userId, installId, token],
-    );
-    if (!res.rowCount) throw new NotFoundException({ code: 'DEVICE_NOT_FOUND' });
+    if (!(await setPushToken(this.db, principal.userId, installId, token))) throw new NotFoundException({ code: 'DEVICE_NOT_FOUND' });
     return { registered: true };
   }
 
   async deliveryReport(principal: Principal, scope: 'Area' | 'All', days = 7) {
-    const areas = scope === 'Area' ? await staffAreaIds(this.db, principal.userId) : [];
-    if (scope === 'Area' && areas.length === 0) throw new HttpException({ code: 'FORBIDDEN' }, HttpStatus.FORBIDDEN);
-    const { rows } = await this.db.query<{ id: string; event_code: string; channel: string; status: string; is_critical: boolean; request_id: string | null; reference_no: string | null; failed_at: Date | null; attempts: number }>(
-      `SELECT n.id, e.event_code, n.channel, n.status, n.is_critical, n.request_id, r.reference_no, n.failed_at,
-              (SELECT count(*)::int FROM ntf.delivery_attempt a WHERE a.notification_id = n.id) AS attempts
-         FROM ntf.notification n JOIN ntf.notification_event e ON e.id = n.notification_event_id LEFT JOIN req.blood_request r ON r.id = n.request_id
-        WHERE n.status IN ('Failed','Suppressed') AND n.updated_at > now() - make_interval(days => $1::int)
-          ${scope === 'Area' ? 'AND r.area_id = ANY($2::uuid[])' : ''}
-        ORDER BY n.is_critical DESC, n.updated_at DESC LIMIT 200`,
-      scope === 'Area' ? [days, areas] : [days],
-    );
-    return rows.map((r) => ({ id: r.id, eventCode: r.event_code, channel: r.channel, status: r.status, critical: r.is_critical, requestId: r.request_id, requestReference: r.reference_no, failedAt: r.failed_at, attempts: r.attempts }));
+    const areas = scope === 'Area' ? new Set(await staffAreaIds(this.db, principal.userId)) : null;
+    if (areas && areas.size === 0) throw new HttpException({ code: 'FORBIDDEN' }, HttpStatus.FORBIDDEN);
+    const report = [];
+    for (let offset = 0; report.length < REPORT_PAGE; offset += REPORT_PAGE) {
+      const rows = await this.db.orm
+        .select({
+          id: notification.id, eventCode: notificationEvent.eventCode, channel: notification.channel, status: notification.status, critical: notification.isCritical,
+          requestId: notification.requestId, failedAt: notification.failedAt,
+          attempts: sql<number>`(SELECT count(*)::int FROM ${deliveryAttempt} WHERE ${deliveryAttempt.notificationId} = ${notification.id})`,
+        })
+        .from(notification)
+        .innerJoin(notificationEvent, eq(notificationEvent.id, notification.notificationEventId))
+        .where(and(
+          inArray(notification.status, ['Failed', 'Suppressed']), sql`${notification.updatedAt} > now() - make_interval(days => ${days}::int)`,
+          areas ? isNotNull(notification.requestId) : undefined,
+        ))
+        .orderBy(desc(notification.isCritical), desc(notification.updatedAt), desc(notification.id))
+        .limit(REPORT_PAGE)
+        .offset(offset);
+      const routing = await requestRouting(this.db, rows.flatMap((r) => (r.requestId ? [r.requestId] : [])));
+      for (const r of rows) {
+        const request = r.requestId ? routing.get(r.requestId) : undefined;
+        if (areas && !(request?.areaId && areas.has(request.areaId))) continue;
+        if (report.length < REPORT_PAGE) report.push({ ...r, requestReference: request?.referenceNo ?? null });
+      }
+      if (!areas || rows.length < REPORT_PAGE) break;
+    }
+    return report;
   }
 
-  private async markCompanionsRead(id: string) {
-    await this.db.query(
-      `UPDATE ntf.notification o SET read_at = COALESCE(o.read_at, now()), updated_at = now()
-        FROM ntf.notification n WHERE n.id = $1 AND o.notification_event_id = n.notification_event_id AND o.recipient_user_id = n.recipient_user_id AND o.id <> n.id`,
-      [id],
-    );
+  private async markCompanionsRead(id: string, eventId: string, userId: string) {
+    await this.db.orm
+      .update(notification)
+      .set({ readAt: sql`COALESCE(${notification.readAt}, now())`, updatedAt: sql`now()` })
+      .where(and(eq(notification.notificationEventId, eventId), eq(notification.recipientUserId, userId), ne(notification.id, id)));
   }
 
   private varsFor(input: EnqueueInput, lang: Lang): Vars {
     return typeof input.vars === 'function' ? input.vars(lang) : input.vars;
   }
 
-  private async languageOf(db: Db, userId: string): Promise<Lang | null> {
-    const { rows } = await db.query<{ preferred_language: Lang }>('SELECT preferred_language FROM idn.app_user WHERE id = $1 AND deleted_at IS NULL', [userId]);
-    return rows[0]?.preferred_language ?? null;
-  }
-
-  private async template(db: Db, eventCode: string, channel: string, lang: Lang) {
-    const { rows } = await db.query<{ id: string; title: string | null; body: string }>(
-      `SELECT v.id, v.title, v.body FROM ntf.notification_template t JOIN ntf.template_version v ON v.template_id = t.id AND v.status = 'Approved'
-        WHERE t.event_code = $1::ntf_event_code AND t.channel = $2::notification_channel AND t.status = 'Active'
-        ORDER BY (v.language = $3::ui_language) DESC LIMIT 1`,
-      [eventCode, channel, lang],
-    );
-    return rows[0] ?? null;
+  async template(db: Db, eventCode: EventCode, channel: Channel, lang: Lang) {
+    const [row] = await db.orm
+      .select({ id: templateVersion.id, title: templateVersion.title, body: templateVersion.body })
+      .from(notificationTemplate)
+      .innerJoin(templateVersion, and(eq(templateVersion.templateId, notificationTemplate.id), eq(templateVersion.status, 'Approved')))
+      .where(and(eq(notificationTemplate.eventCode, eventCode), eq(notificationTemplate.channel, channel), eq(notificationTemplate.status, 'Active')))
+      .orderBy(desc(sql`${templateVersion.language} = ${lang}`))
+      .limit(1);
+    return row ?? null;
   }
 }

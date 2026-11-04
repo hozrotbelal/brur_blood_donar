@@ -5,11 +5,12 @@ import { InvitationController } from './invitation.controller';
 import { InvitationService } from './invitation.service';
 import { MatchingController } from './matching.controller';
 import { MatchingService } from './matching.service';
+import { ChangeRecheckSubscriber } from './change-recheck.subscriber';
 
 @Module({
   imports: [CaseModule],
   controllers: [MatchingController, InvitationController],
-  providers: [MatchingService, InvitationService, StatusHistoryService],
+  providers: [MatchingService, InvitationService, StatusHistoryService, ChangeRecheckSubscriber],
   exports: [MatchingService, InvitationService],
 })
 export class MatchingModule {}

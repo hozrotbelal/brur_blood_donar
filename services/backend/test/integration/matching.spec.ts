@@ -10,13 +10,14 @@ import { AuthService } from '../../src/modules/identity/auth.service';
 import { DonorService } from '../../src/modules/identity/donor.service';
 import { PasswordService } from '../../src/modules/identity/password.service';
 import { SmsSender } from '../../src/modules/identity/sms.port';
-import { TokenService } from '../../src/modules/identity/token.service';
+import { TokenService } from '../../src/platform/security/token.service';
 import { RequestService } from '../../src/modules/request/request.service';
 import { ReviewService } from '../../src/modules/request/review.service';
 import { InvitationService } from '../../src/modules/matching/invitation.service';
 import { CaseService } from '../../src/modules/case-workflow/case.service';
 import { CaseSupport } from '../../src/modules/case-workflow/case.support';
 import { MatchingService } from '../../src/modules/matching/matching.service';
+import { buildAuth, setupTokenOf, testDevice } from './identity-harness';
 
 const url = process.env.TEST_DATABASE_URL;
 const suite = url ? describe : describe.skip;
@@ -50,10 +51,10 @@ suite('matching and invitations (needs TEST_DATABASE_URL with all migrations app
   async function newUser(role: 'DON' | 'PAT'): Promise<Principal> {
     const p = phone();
     const { challengeId } = await auth.register({ phone: p, role, language: 'bn' });
-    const { setupToken } = await auth.verifyOtp({ challengeId, code: sms.last, role, language: 'bn' });
+    const setupToken = setupTokenOf(await auth.verifyOtp({ challengeId, code: sms.last, role, language: 'bn' }));
     await auth.setPassword({
       setupToken, password: 'correct horse battery',
-      device: { installId: randomUUID(), platform: 'android', model: 'T', osVersion: '14', appVersion: '1' },
+      device: testDevice(),
     });
     const row = await db.query<{ id: string }>('SELECT id FROM idn.app_user WHERE phone_e164 = $1', [`+880${p.slice(1)}`]);
     return { userId: row.rows[0].id, role, grants: await auth.loadGrants(row.rows[0].id, role) };
@@ -127,9 +128,9 @@ suite('matching and invitations (needs TEST_DATABASE_URL with all migrations app
     const audit = new AuditService(outbox);
     const history = new StatusHistoryService(audit);
     const policy = new PolicyService();
-    auth = new AuthService(db, new PasswordService(), tokens, sms, outbox, audit);
+    auth = buildAuth(db, tokens, sms, outbox, audit);
     donors = new DonorService(db, history, outbox);
-    requests = new RequestService(db, policy, history, outbox);
+    requests = new RequestService(db, policy, history, outbox, audit);
     review = new ReviewService(db, policy, history, outbox);
     matching = new MatchingService(db, policy, history, outbox);
     invitations = new InvitationService(db, history, outbox, new CaseService(db, new CaseSupport(policy, history, outbox), history));
@@ -304,5 +305,34 @@ suite('matching and invitations (needs TEST_DATABASE_URL with all migrations app
     expect(await matching.startPendingSearches()).toBeGreaterThanOrEqual(1);
     const runs = await db.query('SELECT wave_no, trigger FROM src.match_run WHERE request_id = $1', [requestId]);
     expect(runs.rows).toEqual([{ wave_no: 1, trigger: 'AUTO_ON_VERIFIED' }]);
+  });
+
+  it('cancels unanswered invitations and proposes a new wave after an approved change', async () => {
+    const answered = await newDonor({ km: 1 });
+    const waiting = await newDonor({ km: 2 });
+    const { requestId, agent, patientUser } = await verifiedRequest();
+    const waveId = (await matching.startSearch(requestId))!;
+    await matching.approveWave(agent, waveId, {});
+    await invitations.dispatchDue(1000);
+    const [answeredInvite] = await invitations.list(answered.user);
+    await invitations.respond(answered.user, answeredInvite.id, { response: 'Unavailable' });
+
+    const { changes } = await requests.updateRequest(patientUser, requestId, { quantityUnits: 2 });
+    await review.approveChange(agent, requestId, changes[0].id, {});
+    const result = await matching.recheckAfterChange(requestId);
+
+    expect(result.cancelled).toBe(1);
+    const rows = await db.query<{ donor_profile_id: string; status: string; cancel_reason: string | null }>(
+      'SELECT donor_profile_id, status, cancel_reason FROM src.invitation WHERE request_id = $1',
+      [requestId],
+    );
+    const byDonor = new Map(rows.rows.map((r) => [r.donor_profile_id, r]));
+    expect(byDonor.get(waiting.profileId)).toMatchObject({ status: 'Cancelled', cancel_reason: 'REQUEST_CHANGED' });
+    expect(byDonor.get(answered.profileId)?.status).toBe('Responded');
+    const event = await db.query(`SELECT payload FROM platform.outbox_event WHERE aggregate_id = $1 AND event_type = 'InvitationsCancelled'`, [requestId]);
+    expect(event.rows).toHaveLength(1);
+    expect(result.waveId).not.toBeNull();
+    const waves = await matching.listWaves(agent, requestId);
+    expect(waves.find((w) => w.id === result.waveId)?.status).toBe('Pending approval');
   });
 });

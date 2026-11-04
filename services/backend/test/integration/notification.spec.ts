@@ -10,7 +10,7 @@ import { AuthService } from '../../src/modules/identity/auth.service';
 import { DonorService } from '../../src/modules/identity/donor.service';
 import { PasswordService } from '../../src/modules/identity/password.service';
 import { SmsSender } from '../../src/modules/identity/sms.port';
-import { TokenService } from '../../src/modules/identity/token.service';
+import { TokenService } from '../../src/platform/security/token.service';
 import { RequestService } from '../../src/modules/request/request.service';
 import { ReviewService } from '../../src/modules/request/review.service';
 import { InvitationService } from '../../src/modules/matching/invitation.service';
@@ -20,9 +20,11 @@ import { AppointmentService } from '../../src/modules/case-workflow/appointment.
 import { OutcomeService } from '../../src/modules/case-workflow/outcome.service';
 import { EventBus } from '../../src/platform/outbox/event-bus';
 import { OutboxRelay } from '../../src/platform/outbox/outbox.relay';
+import { ChangeRecheckSubscriber } from '../../src/modules/matching/change-recheck.subscriber';
 import { NotificationDispatcher, NotificationPlanner, NotificationService } from '../../src/modules/notification/notification.public';
 import { SimulatedPushGateway, SimulatedSmsGateway } from '../../src/modules/notification/gateway.ports';
 import { MatchingService } from '../../src/modules/matching/matching.service';
+import { buildAuth, setupTokenOf, testDevice } from './identity-harness';
 
 const url = process.env.TEST_DATABASE_URL;
 const suite = url ? describe : describe.skip;
@@ -65,10 +67,10 @@ suite('notifications (needs TEST_DATABASE_URL with all migrations applied)', () 
   async function newUser(role: 'DON' | 'PAT'): Promise<Principal> {
     const p = phone();
     const { challengeId } = await auth.register({ phone: p, role, language: 'bn' });
-    const { setupToken } = await auth.verifyOtp({ challengeId, code: sms.last, role, language: 'bn' });
+    const setupToken = setupTokenOf(await auth.verifyOtp({ challengeId, code: sms.last, role, language: 'bn' }));
     await auth.setPassword({
       setupToken, password: 'correct horse battery',
-      device: { installId: randomUUID(), platform: 'android', model: 'T', osVersion: '14', appVersion: '1' },
+      device: testDevice(),
     });
     const row = await db.query<{ id: string }>('SELECT id FROM idn.app_user WHERE phone_e164 = $1', [`+880${p.slice(1)}`]);
     return { userId: row.rows[0].id, role, grants: await auth.loadGrants(row.rows[0].id, role) };
@@ -143,9 +145,9 @@ suite('notifications (needs TEST_DATABASE_URL with all migrations applied)', () 
     const history = new StatusHistoryService(audit);
     policy = new PolicyService();
     const support = new CaseSupport(policy, history, outbox);
-    auth = new AuthService(db, new PasswordService(), tokens, sms, outbox, audit);
+    auth = buildAuth(db, tokens, sms, outbox, audit);
     donors = new DonorService(db, history, outbox);
-    requests = new RequestService(db, policy, history, outbox);
+    requests = new RequestService(db, policy, history, outbox, audit);
     review = new ReviewService(db, policy, history, outbox);
     matching = new MatchingService(db, policy, history, outbox);
     cases = new CaseService(db, support, history);
@@ -157,6 +159,7 @@ suite('notifications (needs TEST_DATABASE_URL with all migrations applied)', () 
     notifications = new NotificationService(db);
     planner = new NotificationPlanner(db, bus, notifications);
     planner.onModuleInit();
+    new ChangeRecheckSubscriber(bus, matching).onModuleInit();
     dispatcher = new NotificationDispatcher(db, notifications, new SimulatedPushGateway(), new SimulatedSmsGateway());
   });
   beforeAll(async () => {
@@ -215,6 +218,7 @@ suite('notifications (needs TEST_DATABASE_URL with all migrations applied)', () 
     const receipt = inbox.find((n) => n.eventCode === 'NTF-EV-01');
     expect(receipt).toBeDefined();
     expect(receipt!.body).toContain('জমা হয়েছে');
+    expect(receipt!.category).toBe('REQUEST_UPDATES');
     expect((await notifications.unreadCount(ctx.patientUser)).unread).toBeGreaterThan(0);
     await notifications.markRead(ctx.patientUser, receipt!.id);
     const after = await notifications.inbox(ctx.patientUser);
@@ -371,6 +375,22 @@ suite('notifications (needs TEST_DATABASE_URL with all migrations applied)', () 
     await pump();
     const pushRows = (await forUser(donor.user.userId, 'NTF-EV-04')).filter((n) => n.channel === 'PUSH');
     expect(pushRows[0].status).toBe('Cancelled');
+    const told = await forUser(donor.user.userId, 'NTF-EV-13');
+    expect(told.map((n) => n.channel)).toEqual(['IN_APP', 'PUSH']);
+  });
+
+  it('tells donors with unanswered invitations when an approved change cancels them', async () => {
+    const donor = await newDonor({ km: 1 });
+    const ctx = await verifiedRequest();
+    const waveId = (await matching.startSearch(ctx.requestId))!;
+    await matching.approveWave(ctx.agent, waveId, {});
+    await invitations.dispatchDue(1000);
+    await pump();
+    const { changes } = await requests.updateRequest(ctx.patientUser, ctx.requestId, { quantityUnits: 2 });
+    await review.approveChange(ctx.agent, ctx.requestId, changes[0].id, {});
+    await pump();
+    const invitation = await rows('SELECT status::text AS status FROM src.invitation WHERE request_id = $1', [ctx.requestId]);
+    expect(invitation).toEqual([{ status: 'Cancelled' }]);
     const told = await forUser(donor.user.userId, 'NTF-EV-13');
     expect(told.map((n) => n.channel)).toEqual(['IN_APP', 'PUSH']);
   });

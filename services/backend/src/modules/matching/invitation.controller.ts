@@ -1,9 +1,10 @@
 import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Req } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { RequirePermission } from '../../platform/policy/policy.guard';
 import { Principal } from '../../platform/policy/policy.types';
 import { RespondDto, WithdrawInvitationDto } from './invitation.dto';
 import { InvitationService } from './invitation.service';
+import { InvitationViewDto } from './invitation-view.dto';
 
 interface Req {
   principal: Principal;
@@ -15,7 +16,7 @@ interface Req {
 export class InvitationController {
   constructor(private readonly invitations: InvitationService) {}
 
-  @Get() @RequirePermission('invitation.view', 'Own')
+  @Get() @RequirePermission('invitation.view', 'Own') @ApiResponse({ status: 200, type: [InvitationViewDto] })
   list(@Req() req: Req) {
     return this.invitations.list(req.principal);
   }
@@ -25,7 +26,7 @@ export class InvitationController {
     return this.invitations.open(req.principal, id);
   }
 
-  @Post(':id/respond') @HttpCode(200) @RequirePermission('invitation.respond', 'Own')
+  @Post(':id/respond') @HttpCode(200) @RequirePermission('invitation.respond', 'Own') @ApiResponse({ status: 200, type: InvitationViewDto })
   respond(@Param('id', ParseUUIDPipe) id: string, @Body() dto: RespondDto, @Req() req: Req) {
     return this.invitations.respond(req.principal, id, dto);
   }

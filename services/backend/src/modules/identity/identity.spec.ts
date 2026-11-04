@@ -1,7 +1,7 @@
 import { generateOtp, hashOtp, otpMatches } from './otp';
 import { checkPassword } from './password-policy';
 import { maskPhone, normalizeBdPhone } from './phone';
-import { TokenService } from './token.service';
+import { TokenService } from '../../platform/security/token.service';
 import { AppConfig } from '../../platform/config/app-config';
 
 describe('phone', () => {

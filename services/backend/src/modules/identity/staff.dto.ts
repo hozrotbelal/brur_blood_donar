@@ -19,3 +19,20 @@ export class ChangeAssignmentDto {
   @ApiPropertyOptional({ type: [String] }) @IsOptional() @IsArray() @ArrayMaxSize(50) @IsUUID('all', { each: true }) areaIds?: string[];
   @ApiProperty() @IsString() @MinLength(5) @MaxLength(500) reason!: string;
 }
+
+export class StaffInvitationDto {
+  @ApiProperty() id!: string;
+  @ApiProperty({ description: 'Last four digits of the invited number' }) phoneLast4!: string;
+  @ApiProperty() roleCode!: string;
+  @ApiProperty({ nullable: true, type: String }) tierCode!: string | null;
+  @ApiProperty({ type: [String] }) areaIds!: string[];
+  @ApiProperty() status!: string;
+  @ApiProperty({ format: 'date-time' }) expiresAt!: string;
+  @ApiProperty({ format: 'date-time' }) createdAt!: string;
+  @ApiProperty({ nullable: true, type: String, format: 'date-time' }) acceptedAt!: string | null;
+}
+
+export class StaffInvitationCreatedDto {
+  @ApiProperty() id!: string;
+  @ApiProperty() expiresInDays!: number;
+}

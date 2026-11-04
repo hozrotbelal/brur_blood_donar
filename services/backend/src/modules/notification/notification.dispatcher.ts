@@ -1,19 +1,37 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { and, count, eq, gt, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import { DatabaseService, Db } from '../../platform/db/database.service';
-import { NotificationService } from './notification.service';
-import { categoryOf, NotificationRow } from './notification.types';
+import { caseOwnersForRequest } from '../case-workflow/read-model.public';
+import { activePushDevices, channelPreference, hasSmsChannelConsent, phoneOf } from '../identity/read-model.public';
+import { requestRouting } from '../request/read-model.public';
+import { EventCode, NotificationService } from './notification.service';
+import { categoryOf, Lang, NotificationRole, NotificationRow } from './notification.types';
 import { PushGateway, SmsGateway } from './gateway.ports';
+import { deliveryAttempt, notification, notificationEvent, notificationRule, suppression } from './schema';
 
 interface Rule {
-  max_attempts: number;
-  retry_backoff_seconds: number[];
-  max_sms_per_request_per_day: number;
-  respects_quiet_hours: boolean;
-  sms_fallback_allowed: boolean;
-  fallback_after_seconds: Record<string, number> | null;
+  maxAttempts: number;
+  retryBackoffSeconds: number[];
+  maxSmsPerRequestPerDay: number;
+  respectsQuietHours: boolean;
 }
 
-type Decision = { action: 'send' } | { action: 'suppress'; reason: string } | { action: 'defer'; until: Date } | { action: 'fail'; code: string };
+type SuppressionReason = NonNullable<(typeof notification.$inferSelect)['suppressionReason']>;
+type Provider = (typeof deliveryAttempt.$inferSelect)['provider'];
+
+type Decision = { action: 'send' } | { action: 'suppress'; reason: SuppressionReason } | { action: 'defer'; until: Date } | { action: 'fail'; code: string };
+
+interface FallbackRow {
+  id: string;
+  notification_event_id: string;
+  recipient_user_id: string;
+  request_id: string | null;
+  case_id: string | null;
+  invitation_id: string | null;
+  language: Lang;
+  is_critical: boolean;
+  event_code: string;
+}
 
 const DHAKA_OFFSET_MIN = 6 * 60;
 
@@ -50,6 +68,7 @@ export class NotificationDispatcher {
 
   async dispatchDue(limit = 100): Promise<number> {
     return this.db.transaction(async (tx) => {
+      // Raw SQL: SKIP LOCKED worker loop (database-guidelines).
       const { rows } = await tx.query<NotificationRow>(
         `SELECT n.id, n.notification_event_id, n.recipient_user_id, n.channel, n.language, n.request_id, n.case_id, n.invitation_id, n.status, n.is_critical,
                 n.rendered_title, n.rendered_body, n.scheduled_for, e.event_code::text AS event_code,
@@ -69,8 +88,8 @@ export class NotificationDispatcher {
 
   async fallbackDue(limit = 100): Promise<number> {
     return this.db.transaction(async (tx) => {
-      const { rows } = await tx.query<{ id: string; notification_event_id: string; recipient_user_id: string; request_id: string | null; case_id: string | null; invitation_id: string | null;
-        language: string; is_critical: boolean; event_code: string; urgency: string | null; role: string; rule: Rule }>(
+      // Raw SQL: SKIP LOCKED worker loop (database-guidelines).
+      const { rows } = await tx.query<FallbackRow>(
         `SELECT n.id, n.notification_event_id, n.recipient_user_id, n.request_id, n.case_id, n.invitation_id, n.language::text, n.is_critical, e.event_code::text,
                 r.urgency::text AS urgency, ur.code::text AS role,
                 json_build_object('max_attempts', nr.max_attempts, 'retry_backoff_seconds', nr.retry_backoff_seconds, 'max_sms_per_request_per_day', nr.max_sms_per_request_per_day,
@@ -95,38 +114,41 @@ export class NotificationDispatcher {
     });
   }
 
-  private async createSmsFallback(tx: Db, n: { id: string; notification_event_id: string; recipient_user_id: string; request_id: string | null; case_id: string | null; invitation_id: string | null; language: string; is_critical: boolean; event_code: string }): Promise<number> {
-    const t = await tx.query<{ id: string; body: string }>(
-      `SELECT v.id, v.body FROM ntf.notification_template t JOIN ntf.template_version v ON v.template_id = t.id AND v.status = 'Approved'
-        WHERE t.event_code = $1::ntf_event_code AND t.channel = 'SMS' AND t.status = 'Active' ORDER BY (v.language = $2::ui_language) DESC LIMIT 1`,
-      [n.event_code, n.language],
-    );
-    if (!t.rows[0]) return 0;
+  private async createSmsFallback(tx: Db, n: FallbackRow): Promise<number> {
+    const t = await this.notifications.template(tx, n.event_code as EventCode, 'SMS', n.language);
+    if (!t) return 0;
     const vars = await this.varsFor(tx, n.notification_event_id, n.language);
-    const body = t.rows[0].body.replace(/\{\{(\w+)\}\}/g, (_m, k: string) => vars[k] ?? '');
-    const res = await tx.query(
-      `INSERT INTO ntf.notification (notification_event_id, recipient_user_id, channel, template_version_id, language, request_id, case_id, invitation_id, fallback_of_id,
-                                     dedupe_key, is_critical, rendered_body, scheduled_for)
-       VALUES ($1, $2, 'SMS', $3, $4::ui_language, $5, $6, $7, $8, $9, $10, $11, now()) ON CONFLICT DO NOTHING`,
-      [n.notification_event_id, n.recipient_user_id, t.rows[0].id, n.language, n.request_id, n.case_id, n.invitation_id, n.id, `fallback:${n.id}`, n.is_critical, body],
-    );
-    return res.rowCount ?? 0;
+    const body = t.body.replace(/\{\{(\w+)\}\}/g, (_m, k: string) => vars[k] ?? '');
+    const rows = await tx.orm
+      .insert(notification)
+      .values({
+        notificationEventId: n.notification_event_id, recipientUserId: n.recipient_user_id, channel: 'SMS', templateVersionId: t.id, language: n.language,
+        requestId: n.request_id, caseId: n.case_id, invitationId: n.invitation_id, fallbackOfId: n.id,
+        dedupeKey: `fallback:${n.id}`, isCritical: n.is_critical, renderedBody: body, scheduledFor: sql`now()`,
+      })
+      .onConflictDoNothing()
+      .returning({ id: notification.id });
+    return rows.length;
   }
 
-  private async varsFor(tx: Db, eventId: string, language: string): Promise<Record<string, string>> {
-    const { rows } = await tx.query<{ vars: Record<string, string> | null }>('SELECT payload -> \'varsByLang\' -> $2::text AS vars FROM ntf.notification_event WHERE id = $1', [eventId, language]);
-    return rows[0]?.vars ?? {};
+  private async varsFor(tx: Db, eventId: string, language: Lang): Promise<Record<string, string>> {
+    const [row] = await tx.orm.select({ payload: notificationEvent.payload }).from(notificationEvent).where(eq(notificationEvent.id, eventId));
+    const payload = row?.payload as { varsByLang?: Record<string, Record<string, string>> } | undefined;
+    return payload?.varsByLang?.[language] ?? {};
   }
 
   private async process(tx: Db, n: NotificationRow): Promise<void> {
     const rule = await this.rule(tx, n.event_code, n.role);
     const decision = await this.decide(tx, n, rule);
     if (decision.action === 'suppress') {
-      await tx.query(`UPDATE ntf.notification SET status = 'Suppressed', suppression_reason = $2::suppression_reason, version = version + 1, updated_at = now() WHERE id = $1`, [n.id, decision.reason]);
+      await tx.orm
+        .update(notification)
+        .set({ status: 'Suppressed', suppressionReason: decision.reason, version: sql`${notification.version} + 1`, updatedAt: sql`now()` })
+        .where(eq(notification.id, n.id));
       return;
     }
     if (decision.action === 'defer') {
-      await tx.query(`UPDATE ntf.notification SET scheduled_for = $2, updated_at = now() WHERE id = $1`, [n.id, decision.until]);
+      await tx.orm.update(notification).set({ scheduledFor: decision.until, updatedAt: sql`now()` }).where(eq(notification.id, n.id));
       return;
     }
     if (decision.action === 'fail') {
@@ -144,112 +166,111 @@ export class NotificationDispatcher {
   private async send(tx: Db, n: NotificationRow): Promise<void> {
     const attempt = n.attempts + 1;
     if (n.channel === 'IN_APP') {
-      await tx.query(`INSERT INTO ntf.delivery_attempt (notification_id, attempt_no, provider, result, requested_at, result_at) VALUES ($1, $2, 'IN_APP', 'DELIVERED', now(), now())`, [n.id, attempt]);
-      await tx.query(`UPDATE ntf.notification SET status = 'Delivered', sent_at = now(), delivered_at = now(), version = version + 1, updated_at = now() WHERE id = $1`, [n.id]);
+      await tx.orm.insert(deliveryAttempt).values({ notificationId: n.id, attemptNo: attempt, provider: 'IN_APP', result: 'DELIVERED', requestedAt: sql`now()`, resultAt: sql`now()` });
+      await tx.orm
+        .update(notification)
+        .set({ status: 'Delivered', sentAt: sql`now()`, deliveredAt: sql`now()`, version: sql`${notification.version} + 1`, updatedAt: sql`now()` })
+        .where(eq(notification.id, n.id));
       return;
     }
+    let provider: Provider = 'SMS_GATEWAY';
+    let messageId: string;
     if (n.channel === 'PUSH') {
-      const devices = await tx.query<{ push_token: string; platform: string }>(
-        `SELECT push_token, platform::text FROM idn.device WHERE user_id = $1 AND push_token IS NOT NULL AND sign_out_status = 'Active' AND revoked_at IS NULL`,
-        [n.recipient_user_id],
-      );
-      const result = await this.push.send(devices.rows.map((d) => d.push_token), n.rendered_title ?? '', n.rendered_body ?? '', { notificationId: n.id, ...(n.request_id ? { requestId: n.request_id } : {}) });
-      const provider = devices.rows[0]?.platform === 'ios' ? 'APNS' : 'FCM';
-      await tx.query(
-        `INSERT INTO ntf.delivery_attempt (notification_id, attempt_no, provider, provider_message_id, result, requested_at, result_at) VALUES ($1, $2, $3::delivery_provider, $4, 'ACCEPTED', now(), now())`,
-        [n.id, attempt, provider, result.messageId],
-      );
-      await tx.query(`UPDATE ntf.notification SET status = 'Sent', sent_at = now(), version = version + 1, updated_at = now() WHERE id = $1`, [n.id]);
-      return;
+      const devices = await activePushDevices(tx, n.recipient_user_id);
+      const result = await this.push.send(devices.map((d) => d.pushToken), n.rendered_title ?? '', n.rendered_body ?? '', { notificationId: n.id, ...(n.request_id ? { requestId: n.request_id } : {}) });
+      provider = devices[0]?.platform === 'ios' ? 'APNS' : 'FCM';
+      messageId = result.messageId;
+    } else {
+      const phone = await phoneOf(tx, n.recipient_user_id);
+      messageId = (await this.sms.send(phone as string, n.rendered_body ?? '')).messageId;
     }
-    const phone = await tx.query<{ phone_e164: string }>('SELECT phone_e164 FROM idn.app_user WHERE id = $1', [n.recipient_user_id]);
-    const result = await this.sms.send(phone.rows[0].phone_e164, n.rendered_body ?? '');
-    await tx.query(
-      `INSERT INTO ntf.delivery_attempt (notification_id, attempt_no, provider, provider_message_id, result, requested_at, result_at) VALUES ($1, $2, 'SMS_GATEWAY', $3, 'ACCEPTED', now(), now())`,
-      [n.id, attempt, result.messageId],
-    );
-    await tx.query(`UPDATE ntf.notification SET status = 'Sent', sent_at = now(), version = version + 1, updated_at = now() WHERE id = $1`, [n.id]);
+    await tx.orm.insert(deliveryAttempt).values({ notificationId: n.id, attemptNo: attempt, provider, providerMessageId: messageId, result: 'ACCEPTED', requestedAt: sql`now()`, resultAt: sql`now()` });
+    await tx.orm
+      .update(notification)
+      .set({ status: 'Sent', sentAt: sql`now()`, version: sql`${notification.version} + 1`, updatedAt: sql`now()` })
+      .where(eq(notification.id, n.id));
   }
 
   private async decide(tx: Db, n: NotificationRow, rule: Rule | null): Promise<Decision> {
-    const suppressed = await tx.query(
-      `SELECT 1 FROM ntf.suppression WHERE user_id = $1 AND (channel IS NULL OR channel = $2::notification_channel)
-         AND (active_from IS NULL OR active_from <= now()) AND (active_until IS NULL OR active_until > now()) LIMIT 1`,
-      [n.recipient_user_id, n.channel],
-    );
-    if (suppressed.rows[0]) return { action: 'suppress', reason: 'RECIPIENT_SUPPRESSED' };
+    const [suppressed] = await tx.orm
+      .select({ id: suppression.id })
+      .from(suppression)
+      .where(and(
+        eq(suppression.userId, n.recipient_user_id), or(isNull(suppression.channel), eq(suppression.channel, n.channel)),
+        or(isNull(suppression.activeFrom), lte(suppression.activeFrom, sql`now()`)), or(isNull(suppression.activeUntil), gt(suppression.activeUntil, sql`now()`)),
+      ))
+      .limit(1);
+    if (suppressed) return { action: 'suppress', reason: 'RECIPIENT_SUPPRESSED' };
 
-    const pref = await tx.query<{ push_enabled: boolean; sms_enabled: boolean; inapp_enabled: boolean; quiet_start: string | null; quiet_end: string | null }>(
-      'SELECT push_enabled, sms_enabled, inapp_enabled, quiet_start::text, quiet_end::text FROM idn.notification_preference WHERE user_id = $1 AND category = $2::notification_category',
-      [n.recipient_user_id, categoryOf(n.event_code)],
-    );
-    const p = pref.rows[0];
+    const p = await channelPreference(tx, n.recipient_user_id, categoryOf(n.event_code));
     if (p) {
-      if (n.channel === 'PUSH' && !p.push_enabled) return { action: 'suppress', reason: 'PREFERENCE_OFF' };
-      if (n.channel === 'IN_APP' && !p.inapp_enabled) return { action: 'suppress', reason: 'PREFERENCE_OFF' };
-      if (n.channel === 'SMS' && !p.sms_enabled) return { action: 'suppress', reason: 'PREFERENCE_OFF' };
+      if (n.channel === 'PUSH' && !p.pushEnabled) return { action: 'suppress', reason: 'PREFERENCE_OFF' };
+      if (n.channel === 'IN_APP' && !p.inappEnabled) return { action: 'suppress', reason: 'PREFERENCE_OFF' };
+      if (n.channel === 'SMS' && !p.smsEnabled) return { action: 'suppress', reason: 'PREFERENCE_OFF' };
     }
-    if (n.channel !== 'IN_APP' && rule?.respects_quiet_hours && !n.is_critical && p?.quiet_start && p.quiet_end) {
-      const until = quietUntil(new Date(), p.quiet_start, p.quiet_end);
+    if (n.channel !== 'IN_APP' && rule?.respectsQuietHours && !n.is_critical && p?.quietStart && p.quietEnd) {
+      const until = quietUntil(new Date(), p.quietStart, p.quietEnd);
       if (until) return { action: 'defer', until };
     }
-    if (n.channel === 'PUSH') {
-      const device = await tx.query("SELECT 1 FROM idn.device WHERE user_id = $1 AND push_token IS NOT NULL AND sign_out_status = 'Active' AND revoked_at IS NULL LIMIT 1", [n.recipient_user_id]);
-      if (!device.rows[0]) return { action: 'fail', code: 'NO_PUSH_TOKEN' };
-    }
+    if (n.channel === 'PUSH' && (await activePushDevices(tx, n.recipient_user_id)).length === 0) return { action: 'fail', code: 'NO_PUSH_TOKEN' };
     if (n.channel === 'SMS') {
-      const consent = await tx.query("SELECT 1 FROM idn.consent_record WHERE user_id = $1 AND consent_type = 'CHANNEL_SMS' AND granted AND withdrawn_at IS NULL", [n.recipient_user_id]);
-      if (!consent.rows[0]) return { action: 'suppress', reason: 'NO_CONSENT' };
-      const cap = rule?.max_sms_per_request_per_day ?? 2;
-      const sent = await tx.query<{ n: number }>(
-        `SELECT count(*)::int AS n FROM ntf.notification WHERE recipient_user_id = $1 AND channel = 'SMS' AND request_id IS NOT DISTINCT FROM $2 AND status IN ('Sent','Delivered','Read') AND sent_at > now() - interval '1 day'`,
-        [n.recipient_user_id, n.request_id],
-      );
-      if (sent.rows[0].n >= cap) return { action: 'suppress', reason: 'CONTACT_LIMIT' };
+      if (!(await hasSmsChannelConsent(tx, n.recipient_user_id))) return { action: 'suppress', reason: 'NO_CONSENT' };
+      const cap = rule?.maxSmsPerRequestPerDay ?? 2;
+      const [sent] = await tx.orm
+        .select({ n: count() })
+        .from(notification)
+        .where(and(
+          eq(notification.recipientUserId, n.recipient_user_id), eq(notification.channel, 'SMS'), sql`${notification.requestId} IS NOT DISTINCT FROM ${n.request_id}`,
+          inArray(notification.status, ['Sent', 'Delivered', 'Read']), sql`${notification.sentAt} > now() - interval '1 day'`,
+        ));
+      if (sent.n >= cap) return { action: 'suppress', reason: 'CONTACT_LIMIT' };
     }
     return { action: 'send' };
   }
 
   private async recordAttempt(tx: Db, n: NotificationRow, rule: Rule | null, result: 'FAILED', code: string, messageId: string | null, permanent: boolean): Promise<void> {
     const attempt = n.attempts + 1;
-    const max = rule?.max_attempts ?? 3;
-    const backoff = rule?.retry_backoff_seconds ?? [60, 300];
-    await tx.query(
-      `INSERT INTO ntf.delivery_attempt (notification_id, attempt_no, provider, provider_message_id, result, error_code, requested_at, result_at, next_retry_at)
-       VALUES ($1, $2, $3::delivery_provider, $4, $5::delivery_result, $6, now(), now(), $7)`,
-      [n.id, attempt, n.channel === 'SMS' ? 'SMS_GATEWAY' : n.channel === 'PUSH' ? 'FCM' : 'IN_APP', messageId, result, code,
-        !permanent && attempt < max ? new Date(Date.now() + (backoff[Math.min(attempt - 1, backoff.length - 1)] ?? 60) * 1000) : null],
-    );
-    if (!permanent && attempt < max) {
-      const next = new Date(Date.now() + (backoff[Math.min(attempt - 1, backoff.length - 1)] ?? 60) * 1000);
-      await tx.query(`UPDATE ntf.notification SET status = 'Queued', queued_at = COALESCE(queued_at, now()), scheduled_for = $2, updated_at = now() WHERE id = $1`, [n.id, next]);
+    const max = rule?.maxAttempts ?? 3;
+    const backoff = rule?.retryBackoffSeconds ?? [60, 300];
+    const next = !permanent && attempt < max ? new Date(Date.now() + (backoff[Math.min(attempt - 1, backoff.length - 1)] ?? 60) * 1000) : null;
+    await tx.orm.insert(deliveryAttempt).values({
+      notificationId: n.id, attemptNo: attempt, provider: n.channel === 'SMS' ? 'SMS_GATEWAY' : n.channel === 'PUSH' ? 'FCM' : 'IN_APP', providerMessageId: messageId,
+      result, errorCode: code, requestedAt: sql`now()`, resultAt: sql`now()`, nextRetryAt: next,
+    });
+    if (next) {
+      await tx.orm
+        .update(notification)
+        .set({ status: 'Queued', queuedAt: sql`COALESCE(${notification.queuedAt}, now())`, scheduledFor: next, updatedAt: sql`now()` })
+        .where(eq(notification.id, n.id));
       return;
     }
-    await tx.query(`UPDATE ntf.notification SET status = 'Failed', failed_at = now(), version = version + 1, updated_at = now() WHERE id = $1`, [n.id]);
-    if (n.is_critical && n.request_id) await this.alertDeliveryFailure(tx, n);
+    await tx.orm
+      .update(notification)
+      .set({ status: 'Failed', failedAt: sql`now()`, version: sql`${notification.version} + 1`, updatedAt: sql`now()` })
+      .where(eq(notification.id, n.id));
+    if (n.is_critical && n.request_id) await this.alertDeliveryFailure(tx, n, n.request_id);
   }
 
-  private async alertDeliveryFailure(tx: Db, n: NotificationRow): Promise<void> {
-    const targets = await tx.query<{ user_id: string; role: 'SUP' | 'ADM' }>(
-      `SELECT c.owner_user_id AS user_id, 'SUP'::text AS role FROM crd.coordination_case c WHERE c.request_id = $1 AND c.owner_user_id IS NOT NULL
-       UNION SELECT r.assigned_support_user_id, 'SUP' FROM req.blood_request r WHERE r.id = $1 AND r.assigned_support_user_id IS NOT NULL`,
-      [n.request_id],
-    );
-    const reference = await tx.query<{ reference_no: string | null }>('SELECT reference_no FROM req.blood_request WHERE id = $1', [n.request_id]);
+  private async alertDeliveryFailure(tx: Db, n: NotificationRow, requestId: string): Promise<void> {
+    const request = (await requestRouting(tx, [requestId])).get(requestId);
+    const targets = new Set(await caseOwnersForRequest(tx, requestId));
+    if (request?.assignedSupportUserId) targets.add(request.assignedSupportUserId);
     await this.notifications.enqueue(tx, {
       eventCode: 'NTF-EV-18', aggregateType: 'NOTIFICATION', aggregateId: n.id, dedupeBase: `delivery-failed:${n.id}`,
-      recipients: targets.rows.map((t) => ({ userId: t.user_id, role: 'SUP' as const })), requestId: n.request_id ?? undefined,
-      vars: { ref: reference.rows[0]?.reference_no ?? '' },
+      recipients: [...targets].map((userId) => ({ userId, role: 'SUP' as const })), requestId,
+      vars: { ref: request?.referenceNo ?? '' },
     });
   }
 
-  private async rule(tx: Db, eventCode: string, role: string | null): Promise<Rule | null> {
+  private async rule(tx: Db, eventCode: string, role: NotificationRole | null): Promise<Rule | null> {
     if (!role) return null;
-    const { rows } = await tx.query<Rule>(
-      `SELECT max_attempts, retry_backoff_seconds, max_sms_per_request_per_day, respects_quiet_hours, sms_fallback_allowed, fallback_after_seconds
-         FROM ntf.notification_rule WHERE event_code = $1::ntf_event_code AND recipient_role = $2::role_code`,
-      [eventCode, role],
-    );
-    return rows[0] ?? null;
+    const [row] = await tx.orm
+      .select({
+        maxAttempts: notificationRule.maxAttempts, retryBackoffSeconds: notificationRule.retryBackoffSeconds,
+        maxSmsPerRequestPerDay: notificationRule.maxSmsPerRequestPerDay, respectsQuietHours: notificationRule.respectsQuietHours,
+      })
+      .from(notificationRule)
+      .where(and(eq(notificationRule.eventCode, eventCode as EventCode), eq(notificationRule.recipientRole, role)));
+    return row ?? null;
   }
 }

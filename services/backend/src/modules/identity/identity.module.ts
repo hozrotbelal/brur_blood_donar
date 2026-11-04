@@ -1,30 +1,21 @@
 import { Module } from '@nestjs/common';
-import { DonorController } from './donor.controller';
-import { DonorService } from './donor.service';
-import { DonationRecordProjector } from './donation-record.projector';
 import { StatusHistoryService } from '../../platform/status/status-history.service';
 import { AuthController } from './auth.controller';
 import { AuthGuard } from './auth.guard';
-import { AuthService } from './auth.service';
-import { PasswordService } from './password.service';
-import { LogSmsSender, SmsSender } from './sms.port';
+import { DonorController } from './donor.controller';
+import { DonorService } from './donor.service';
+import { DonationRecordProjector } from './donation-record.projector';
+import { IdentityCoreModule } from './identity-core.module';
+import { SecurityController } from './security.controller';
 import { StaffController } from './staff.controller';
 import { StaffService } from './staff.service';
-import { TokenService } from './token.service';
+import { WebAuthController } from './web-auth.controller';
+import { WebAuthService } from './web-auth.service';
 
 @Module({
-  controllers: [AuthController, DonorController, StaffController],
-  providers: [
-    PasswordService,
-    TokenService,
-    AuthService,
-    AuthGuard,
-    DonorService,
-    StaffService,
-    DonationRecordProjector,
-    StatusHistoryService,
-    { provide: SmsSender, useClass: LogSmsSender },
-  ],
-  exports: [PasswordService, AuthGuard],
+  imports: [IdentityCoreModule],
+  controllers: [AuthController, SecurityController, WebAuthController, DonorController, StaffController],
+  providers: [AuthGuard, DonorService, StaffService, WebAuthService, DonationRecordProjector, StatusHistoryService],
+  exports: [IdentityCoreModule, AuthGuard],
 })
 export class IdentityModule {}

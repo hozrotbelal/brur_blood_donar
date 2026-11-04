@@ -1,47 +1,39 @@
 import { HttpException, HttpStatus, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { and, asc, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { DatabaseService, Db } from '../../platform/db/database.service';
 import { OutboxService } from '../../platform/outbox/outbox.service';
+import { staffAreaIds } from '../../platform/policy/area-scope';
 import { PolicyService } from '../../platform/policy/policy.service';
 import { PermissionScope, Principal, SCOPE_ORDER } from '../../platform/policy/policy.types';
 import { StatusHistoryService } from '../../platform/status/status-history.service';
 import { maskPhone } from '../identity/identity.public';
 import { RequestCommand, RequestStatus, canActorRun, findTransition, requestStateMachine } from './request-status';
-import { RejectRequestDto, ResolveFlagDto, RequestInformationDto, VerifyRequestDto } from './review.dto';
+import { UPDATABLE_STATUSES } from './request-changes';
+import { DecideChangeDto, RejectChangeDto, RejectRequestDto, ResolveFlagDto, RequestInformationDto, VerifyRequestDto } from './review.dto';
+import { bloodRequest, patient, requestChange, requestFlag } from './schema';
+import { alias } from 'drizzle-orm/pg-core';
 
-interface ReviewRow {
-  id: string;
-  reference_no: string | null;
-  patient_id: string;
-  patient_name: string;
-  requested_blood_group: string;
-  component: string;
-  quantity_units: number;
-  required_by: Date;
-  urgency: string;
-  priority: string;
-  status: RequestStatus;
-  area_id: string | null;
-  contact_phone: string | null;
-  has_moderation_hold: boolean;
-  assigned_support_user_id: string | null;
-  submitted_at: Date | null;
-  first_action_at: Date | null;
-  version: number;
-}
+const reviewColumns = {
+  id: bloodRequest.id, referenceNo: bloodRequest.referenceNo, patientId: bloodRequest.patientId, patientName: patient.displayName,
+  requestedBloodGroup: bloodRequest.requestedBloodGroup, component: bloodRequest.component, quantityUnits: bloodRequest.quantityUnits, requiredBy: bloodRequest.requiredBy,
+  urgency: bloodRequest.urgency, priority: bloodRequest.priority, status: bloodRequest.status, areaId: bloodRequest.areaId, contactPhone: bloodRequest.contactPhone,
+  hasModerationHold: bloodRequest.hasModerationHold, assignedSupportUserId: bloodRequest.assignedSupportUserId, submittedAt: bloodRequest.submittedAt,
+  firstActionAt: bloodRequest.firstActionAt, version: bloodRequest.version,
+};
 
-const COLUMNS = `r.id, r.reference_no, r.patient_id, p.display_name AS patient_name, r.requested_blood_group, r.component, r.quantity_units,
-  r.required_by, r.urgency, r.priority, r.status, r.area_id, r.contact_phone, r.has_moderation_hold, r.assigned_support_user_id,
-  r.submitted_at, r.first_action_at, r.version`;
-const FROM = 'req.blood_request r JOIN req.patient p ON p.id = r.patient_id';
-const REVIEW_STATUSES = ['Submitted', 'Under review', 'Needs information'];
+type ReviewRow = Omit<Pick<typeof bloodRequest.$inferSelect, Exclude<keyof typeof reviewColumns, 'patientName'>>, 'status'> & { patientName: string; status: RequestStatus };
+type RequestStatusValue = (typeof bloodRequest.$inferSelect)['status'];
+type FlagResolution = (typeof requestFlag.$inferSelect)['status'];
+
+const REVIEW_STATUSES: RequestStatusValue[] = ['Submitted', 'Under review', 'Needs information'];
 
 export interface RequestFlagView {
   id: string;
   flagType: string;
   matchedRequestId: string | null;
   matchedReferenceNo: string | null;
-  detail: Record<string, unknown>;
+  detail: unknown;
   status: string;
   createdAt: Date;
   resolvedAt: Date | null;
@@ -79,43 +71,127 @@ export class ReviewService {
   ) {}
 
   async queue(principal: Principal, status?: string) {
-    const areas = await this.areaIds(this.db, principal.userId);
     const scope = widestScope(principal, 'blood_request.view');
-    const visible = scope === 'All' ? 'true' : scope === 'Area' ? '(r.assigned_support_user_id = $1 OR r.area_id = ANY($2::uuid[]))' : '(r.assigned_support_user_id = $1)';
-    const { rows } = await this.db.query<ReviewRow>(
-      `SELECT ${COLUMNS} FROM ${FROM}
-        WHERE r.status = ANY($3::request_status[]) AND r.deleted_at IS NULL AND ${scope ? visible : 'false'}
-        ORDER BY (r.urgency = 'Critical') DESC, (r.urgency = 'Urgent') DESC, r.required_by LIMIT 100`,
-      [principal.userId, areas, status ? [status] : REVIEW_STATUSES],
-    );
-    return rows.map(toReviewView);
+    if (!scope) return [];
+    const areas = await staffAreaIds(this.db, principal.userId);
+    const visible =
+      scope === 'All'
+        ? undefined
+        : scope === 'Area'
+          ? or(eq(bloodRequest.assignedSupportUserId, principal.userId), areas.length ? inArray(bloodRequest.areaId, areas) : sql`false`)
+          : eq(bloodRequest.assignedSupportUserId, principal.userId);
+    const rows = await this.db.orm
+      .select(reviewColumns)
+      .from(bloodRequest)
+      .innerJoin(patient, eq(patient.id, bloodRequest.patientId))
+      .where(and(inArray(bloodRequest.status, status ? [status as RequestStatusValue] : REVIEW_STATUSES), isNull(bloodRequest.deletedAt), visible))
+      .orderBy(desc(sql`(${bloodRequest.urgency} = 'Critical')`), desc(sql`(${bloodRequest.urgency} = 'Urgent')`), asc(bloodRequest.requiredBy))
+      .limit(100);
+    return rows.map((r) => toReviewView(r as ReviewRow));
   }
 
   async detail(principal: Principal, id: string) {
     const row = await this.load(this.db, id, false);
     await this.requireView(this.db, principal, row);
-    return { ...toReviewView(row), flags: await this.flags(id) };
+    return { ...toReviewView(row), flags: await this.flags(id), changes: await this.changes(this.db, id) };
   }
 
-  async flags(requestId: string) {
-    const { rows } = await this.db.query<RequestFlagView>(
-      `SELECT f.id, f.flag_type AS "flagType", f.matched_request_id AS "matchedRequestId", m.reference_no AS "matchedReferenceNo", f.detail,
-              f.status, f.created_at AS "createdAt", f.resolved_at AS "resolvedAt", f.resolution_note AS "resolutionNote"
-         FROM req.request_flag f LEFT JOIN req.blood_request m ON m.id = f.matched_request_id WHERE f.request_id = $1 ORDER BY f.created_at`,
-      [requestId],
-    );
-    return rows;
+  async changes(db: Db, requestId: string) {
+    return db.orm
+      .select({
+        id: requestChange.id, changeType: requestChange.changeType, isMaterial: requestChange.isMaterial, status: requestChange.status,
+        proposedValues: requestChange.proposedValues, previousValues: requestChange.previousValues, createdAt: requestChange.createdAt,
+      })
+      .from(requestChange)
+      .where(eq(requestChange.requestId, requestId))
+      .orderBy(desc(requestChange.createdAt));
+  }
+
+  async approveChange(principal: Principal, id: string, changeId: string, dto: DecideChangeDto) {
+    return this.db.transaction(async (tx) => {
+      const row = await this.load(tx, id, true);
+      await this.requireApprove(tx, principal, row);
+      const change = await this.lockPendingChange(tx, id, changeId);
+      if (!UPDATABLE_STATUSES.includes(row.status)) throw fail('UPDATE_NOT_ALLOWED');
+      const values = { ...(change.proposedValues as Record<string, unknown>) };
+      if (typeof values.requiredBy === 'string') {
+        const requiredBy = new Date(values.requiredBy);
+        if (requiredBy.getTime() <= Date.now()) throw fail('REQUIRED_BY_IN_PAST');
+        values.requiredBy = requiredBy;
+      }
+      await tx.orm
+        .update(bloodRequest)
+        .set({ ...(values as Partial<typeof bloodRequest.$inferInsert>), version: sql`${bloodRequest.version} + 1`, updatedAt: new Date() })
+        .where(eq(bloodRequest.id, id));
+      await this.decide(tx, principal, row, change.id, 'Approved', change.changeType, dto.note);
+      await this.outbox.append(tx, {
+        aggregateType: 'BLOOD_REQUEST', aggregateId: id, eventType: 'RequestChangeApproved',
+        payload: { changeId: change.id, changeType: change.changeType, requestStatus: row.status },
+        version: row.version + 1,
+      });
+      return { ...toReviewView(await this.load(tx, id, false)), flags: await this.flags(id), changes: await this.changes(tx, id) };
+    });
+  }
+
+  async rejectChange(principal: Principal, id: string, changeId: string, dto: RejectChangeDto) {
+    return this.db.transaction(async (tx) => {
+      const row = await this.load(tx, id, true);
+      await this.requireApprove(tx, principal, row);
+      const change = await this.lockPendingChange(tx, id, changeId);
+      await this.decide(tx, principal, row, change.id, 'Rejected', change.changeType, dto.reason);
+      await tx.orm.update(bloodRequest).set({ version: sql`${bloodRequest.version} + 1`, updatedAt: new Date() }).where(eq(bloodRequest.id, id));
+      await this.outbox.append(tx, {
+        aggregateType: 'BLOOD_REQUEST', aggregateId: id, eventType: 'RequestChangeRejected', payload: { changeId: change.id, changeType: change.changeType },
+        version: row.version + 1,
+      });
+      return { ...toReviewView(await this.load(tx, id, false)), flags: await this.flags(id), changes: await this.changes(tx, id) };
+    });
+  }
+
+  private async lockPendingChange(tx: Db, requestId: string, changeId: string) {
+    const [change] = await tx.orm
+      .select({ id: requestChange.id, status: requestChange.status, changeType: requestChange.changeType, proposedValues: requestChange.proposedValues })
+      .from(requestChange)
+      .where(and(eq(requestChange.id, changeId), eq(requestChange.requestId, requestId)))
+      .for('update');
+    if (!change) throw new NotFoundException({ code: 'CHANGE_NOT_FOUND' });
+    if (change.status !== 'Pending') throw fail('CHANGE_NOT_PENDING', HttpStatus.CONFLICT);
+    return change;
+  }
+
+  private async decide(tx: Db, principal: Principal, row: ReviewRow, changeId: string, to: 'Approved' | 'Rejected', changeType: string, reason?: string) {
+    await tx.orm
+      .update(requestChange)
+      .set({ status: to, decidedBy: principal.userId, version: sql`${requestChange.version} + 1`, updatedAt: new Date() })
+      .where(eq(requestChange.id, changeId));
+    await this.history.record(tx, {
+      entityType: 'REQUEST_CHANGE', entityId: changeId, from: 'Pending', to, actorUserId: principal.userId,
+      actorRole: principal.role === 'MOD' ? 'MOD' : 'SUP', source: 'USER', contextRequestId: row.id, reasonCode: changeType, reason,
+      correlationId: randomUUID(),
+    });
+  }
+
+  async flags(requestId: string): Promise<RequestFlagView[]> {
+    const matched = alias(bloodRequest, 'm');
+    return this.db.orm
+      .select({
+        id: requestFlag.id, flagType: requestFlag.flagType, matchedRequestId: requestFlag.matchedRequestId, matchedReferenceNo: matched.referenceNo, detail: requestFlag.detail,
+        status: requestFlag.status, createdAt: requestFlag.createdAt, resolvedAt: requestFlag.resolvedAt, resolutionNote: requestFlag.resolutionNote,
+      })
+      .from(requestFlag)
+      .leftJoin(matched, eq(matched.id, requestFlag.matchedRequestId))
+      .where(eq(requestFlag.requestId, requestId))
+      .orderBy(asc(requestFlag.createdAt));
   }
 
   async resolveFlag(principal: Principal, requestId: string, flagId: string, dto: ResolveFlagDto) {
     return this.db.transaction(async (tx) => {
       const row = await this.load(tx, requestId, true);
       await this.requireApprove(tx, principal, row);
-      const res = await tx.query(
-        `UPDATE req.request_flag SET status = $3, resolved_by = $4, resolved_at = now(), resolution_note = $5
-          WHERE id = $1 AND request_id = $2 AND status = 'Open'`,
-        [flagId, requestId, dto.resolution, principal.userId, dto.note],
-      );
+      const res = await tx.orm
+        .update(requestFlag)
+        .set({ status: dto.resolution as FlagResolution, resolvedBy: principal.userId, resolvedAt: new Date(), resolutionNote: dto.note })
+        .where(and(eq(requestFlag.id, flagId), eq(requestFlag.requestId, requestId), eq(requestFlag.status, 'Open')));
       if (!res.rowCount) throw new NotFoundException({ code: 'FLAG_NOT_FOUND' });
       await this.outbox.append(tx, {
         aggregateType: 'BLOOD_REQUEST', aggregateId: requestId, eventType: 'RequestFlagResolved', payload: { flagId, resolution: dto.resolution },
@@ -128,14 +204,16 @@ export class ReviewService {
     return this.db.transaction(async (tx) => {
       const row = await this.load(tx, id, true);
       await this.requireView(tx, principal, row);
-      if (row.assigned_support_user_id === principal.userId && row.status === 'Under review') return toReviewView(row);
-      if (row.assigned_support_user_id && row.assigned_support_user_id !== principal.userId) throw fail('ALREADY_PICKED_UP', HttpStatus.CONFLICT);
+      if (row.assignedSupportUserId === principal.userId && row.status === 'Under review') return toReviewView(row);
+      if (row.assignedSupportUserId && row.assignedSupportUserId !== principal.userId) throw fail('ALREADY_PICKED_UP', HttpStatus.CONFLICT);
       this.transition(row, 'pick_up', principal);
-      await tx.query(
-        `UPDATE req.blood_request SET status = 'Under review', assigned_support_user_id = $2, first_action_at = COALESCE(first_action_at, now()),
-                version = version + 1, updated_at = now() WHERE id = $1`,
-        [id, principal.userId],
-      );
+      await tx.orm
+        .update(bloodRequest)
+        .set({
+          status: 'Under review', assignedSupportUserId: principal.userId, firstActionAt: sql`coalesce(${bloodRequest.firstActionAt}, now())`,
+          version: sql`${bloodRequest.version} + 1`, updatedAt: new Date(),
+        })
+        .where(eq(bloodRequest.id, id));
       await tx.query(
         `INSERT INTO crd.case_task (request_id, task_type, status, assignee_user_id, dedupe_key)
          VALUES ($1, 'TK_VERIFY_REQUEST', 'In progress', $2, $3) ON CONFLICT DO NOTHING`,
@@ -151,10 +229,7 @@ export class ReviewService {
       const row = await this.load(tx, id, true);
       await this.requireApprove(tx, principal, row);
       this.transition(row, 'request_information', principal);
-      await tx.query(
-        `UPDATE req.blood_request SET status = 'Needs information', version = version + 1, updated_at = now() WHERE id = $1`,
-        [id],
-      );
+      await tx.orm.update(bloodRequest).set({ status: 'Needs information', version: sql`${bloodRequest.version} + 1`, updatedAt: new Date() }).where(eq(bloodRequest.id, id));
       await this.after(tx, principal, row, 'Needs information', 'RequestInformationRequested', {
         reasonCode: 'MISSING_INFORMATION', reason: dto.message, details: { missingItems: dto.items },
       });
@@ -167,15 +242,15 @@ export class ReviewService {
       const row = await this.load(tx, id, true);
       await this.requireApprove(tx, principal, row);
       this.transition(row, 'verify', principal);
-      if (row.has_moderation_hold) throw fail('MODERATION_REVIEW_IN_PROGRESS');
-      const open = await tx.query<{ n: number }>(`SELECT count(*)::int AS n FROM req.request_flag WHERE request_id = $1 AND status = 'Open'`, [id]);
-      if (open.rows[0].n > 0) throw fail('UNRESOLVED_FLAGS');
+      if (row.hasModerationHold) throw fail('MODERATION_REVIEW_IN_PROGRESS');
+      const [open] = await tx.orm.select({ n: sql<number>`count(*)`.mapWith(Number) }).from(requestFlag).where(and(eq(requestFlag.requestId, id), eq(requestFlag.status, 'Open')));
+      if (open.n > 0) throw fail('UNRESOLVED_FLAGS');
       const gaps = checklistGaps(dto);
       if (gaps.length > 0) throw new HttpException({ code: 'CHECKLIST_INCOMPLETE', missing: gaps }, HttpStatus.UNPROCESSABLE_ENTITY);
-      await tx.query(
-        `UPDATE req.blood_request SET status = 'Verified', verified_at = now(), version = version + 1, updated_at = now() WHERE id = $1`,
-        [id],
-      );
+      await tx.orm
+        .update(bloodRequest)
+        .set({ status: 'Verified', verifiedAt: new Date(), version: sql`${bloodRequest.version} + 1`, updatedAt: new Date() })
+        .where(eq(bloodRequest.id, id));
       await this.completeTask(tx, id, principal.userId);
       await this.after(tx, principal, row, 'Verified', 'RequestVerified', { details: { checklist: dto } });
       return toReviewView(await this.load(tx, id, false));
@@ -188,7 +263,7 @@ export class ReviewService {
       if (principal.role === 'MOD') await this.requireModerationReject(principal, row);
       else await this.requireApprove(tx, principal, row);
       this.transition(row, 'reject', principal);
-      await tx.query(`UPDATE req.blood_request SET status = 'Rejected', version = version + 1, updated_at = now() WHERE id = $1`, [id]);
+      await tx.orm.update(bloodRequest).set({ status: 'Rejected', version: sql`${bloodRequest.version} + 1`, updatedAt: new Date() }).where(eq(bloodRequest.id, id));
       await this.completeTask(tx, id, principal.userId);
       await this.after(tx, principal, row, 'Rejected', 'RequestRejected', { reasonCode: dto.reasonCode, reason: dto.explanation });
       return toReviewView(await this.load(tx, id, false));
@@ -231,8 +306,8 @@ export class ReviewService {
 
   private async requireView(db: Db, principal: Principal, row: ReviewRow) {
     const decision = this.policy.decide(principal, 'blood_request.view', {
-      resource: { assignedUserIds: row.assigned_support_user_id ? [row.assigned_support_user_id] : [], areaIds: row.area_id ? [row.area_id] : [] },
-      principalAreaIds: await this.areaIds(db, principal.userId),
+      resource: { assignedUserIds: row.assignedSupportUserId ? [row.assignedSupportUserId] : [], areaIds: row.areaId ? [row.areaId] : [] },
+      principalAreaIds: await staffAreaIds(db, principal.userId),
     });
     if (!decision.allowed) throw new NotFoundException({ code: 'REQUEST_NOT_FOUND' });
   }
@@ -240,54 +315,43 @@ export class ReviewService {
   private async requireApprove(db: Db, principal: Principal, row: ReviewRow) {
     await this.requireView(db, principal, row);
     const decision = this.policy.decide(principal, 'blood_request.approve', {
-      resource: { assignedUserIds: row.assigned_support_user_id ? [row.assigned_support_user_id] : [], areaIds: row.area_id ? [row.area_id] : [] },
-      principalAreaIds: await this.areaIds(db, principal.userId),
+      resource: { assignedUserIds: row.assignedSupportUserId ? [row.assignedSupportUserId] : [], areaIds: row.areaId ? [row.areaId] : [] },
+      principalAreaIds: await staffAreaIds(db, principal.userId),
     });
     if (!decision.allowed) throw new HttpException({ code: 'FORBIDDEN' }, HttpStatus.FORBIDDEN);
   }
 
   private async requireModerationReject(principal: Principal, row: ReviewRow) {
     if (!widestScope(principal, 'blood_request.reject_moderation')) throw new HttpException({ code: 'FORBIDDEN' }, HttpStatus.FORBIDDEN);
-    if (!row.has_moderation_hold) throw fail('NO_MODERATION_HOLD');
+    if (!row.hasModerationHold) throw fail('NO_MODERATION_HOLD');
   }
 
   private async load(db: Db, id: string, lock: boolean): Promise<ReviewRow> {
-    const { rows } = await db.query<ReviewRow>(
-      `SELECT ${COLUMNS} FROM ${FROM} WHERE r.id = $1 AND r.deleted_at IS NULL ${lock ? 'FOR UPDATE OF r' : ''}`,
-      [id],
-    );
-    if (!rows[0]) throw new NotFoundException({ code: 'REQUEST_NOT_FOUND' });
-    return rows[0];
-  }
-
-  private async areaIds(db: Db, userId: string): Promise<string[]> {
-    const { rows } = await db.query<{ area_id: string }>(
-      `SELECT s.area_id FROM idn.permission_scope s JOIN idn.user_role ur ON ur.id = s.user_role_id
-        WHERE ur.user_id = $1 AND ur.status = 'Active' AND s.revoked_at IS NULL AND s.area_id IS NOT NULL`,
-      [userId],
-    );
-    return rows.map((r) => r.area_id);
+    const query = db.orm.select(reviewColumns).from(bloodRequest).innerJoin(patient, eq(patient.id, bloodRequest.patientId)).where(and(eq(bloodRequest.id, id), isNull(bloodRequest.deletedAt)));
+    const [row] = lock ? await query.for('update') : await query;
+    if (!row) throw new NotFoundException({ code: 'REQUEST_NOT_FOUND' });
+    return row as ReviewRow;
   }
 }
 
 export function toReviewView(r: ReviewRow) {
   return {
     id: r.id,
-    referenceNo: r.reference_no,
-    patientName: r.patient_name,
-    requestedBloodGroup: r.requested_blood_group,
+    referenceNo: r.referenceNo,
+    patientName: r.patientName,
+    requestedBloodGroup: r.requestedBloodGroup,
     component: r.component,
-    quantityUnits: r.quantity_units,
-    requiredBy: r.required_by,
+    quantityUnits: r.quantityUnits,
+    requiredBy: r.requiredBy,
     urgency: r.urgency,
     priority: r.priority,
     status: r.status,
-    areaId: r.area_id,
-    contactPhone: r.contact_phone ? maskPhone(r.contact_phone) : null,
-    hasModerationHold: r.has_moderation_hold,
-    assignedSupportUserId: r.assigned_support_user_id,
-    submittedAt: r.submitted_at,
-    firstActionAt: r.first_action_at,
+    areaId: r.areaId,
+    contactPhone: r.contactPhone ? maskPhone(r.contactPhone) : null,
+    hasModerationHold: r.hasModerationHold,
+    assignedSupportUserId: r.assignedSupportUserId,
+    submittedAt: r.submittedAt,
+    firstActionAt: r.firstActionAt,
     version: r.version,
   };
 }

@@ -1,0 +1,1 @@
+{"version":3,"file":"realtime.gateway.js","sourceRoot":"","sources":["../../../../src/platform/http/realtime.gateway.ts"],"names":[],"mappings":";;;;;;;;;AAAA,mDAA2E;AAQpE,IAAM,eAAe,GAArB,MAAM,eAAe;IAC1B,gBAAgB,CAAC,MAAc;QAC7B,MAAM,CAAC,UAAU,CAAC,IAAI,CAAC,CAAC;IAC1B,CAAC;CACF,CAAA;AAJY,0CAAe;0BAAf,eAAe;IAD3B,IAAA,6BAAgB,EAAC,EAAE,SAAS,EAAE,WAAW,EAAE,CAAC;GAChC,eAAe,CAI3B"}

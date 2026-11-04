@@ -4,6 +4,7 @@ Proposed; adjust through a pull request approved by a human.
 
 - Backend: TypeScript in strict mode on Node.js LTS with NestJS. Mobile: Dart with Flutter.
 - Each module folder exposes one public interface; everything else is private to the module.
+- Data access uses Drizzle ORM through the module's generated `schema.ts` (ADR-16). Raw SQL only for the cases listed in the database guidelines, with the reason stated in the service.
 - No business logic in the mobile app or in shared packages.
 - Small pull requests, one module and one layer at a time.
 - Tests accompany every change to business logic.

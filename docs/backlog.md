@@ -1,0 +1,33 @@
+# Development backlog
+
+Ordered list of work. One item is worked at a time. Each item ends with the full backend test suite passing and is delivered as a small batch. Status values: Queued, In progress, Done, Blocked.
+
+Size: S (under a day), M (one to three days), L (more than three days).
+
+| # | Item | Status | Size | Needs from the owner |
+| --- | --- | --- | --- | --- |
+| 1 | ADR-15 staff web portal, CLAUDE.md, MVP scope and OI-31 updates | Done | S | Approved 13 Oct 2026 |
+| 2 | Browser auth: cookie sessions, CSRF, CORS, trusted-browser rule, OpenAPI export | Done | M | Lifetime set by WEB_TRUSTED_BROWSER_DAYS (default 30, 0 = SMS code every time); final value awaits OI-31 |
+| 3 | Database roles and column privileges (bbda_app, bbda_readonly, bbda_migrator) | Blocked | M | Approval of role names, or alternatives |
+| 4 | apps/web skeleton: sign-in, layout, Bangla and English, typed API client | Done | M | Generator openapi-typescript 7.13.0 approved and used |
+| 5 | Support work queue screens: requests, cases, outcomes, disputes, flags, pause and resume, waves | In progress | L | Done: staff shell from the prototype menus, queue, request verification (pick up, checklist, verify, ask for information, reject, flags). Still to do: coordination cases, outcomes, disputes, pause and resume, waves, and the tiles for messages, callbacks, escalations and recovery (backend first) |
+| 6 | Organization Admin: staff invitations and assignments | In progress | M | Done: invitations list, invite and revoke, with typed responses in the spec. Still to do: staff list and assignment changes, roles, access review. Confirm screens from BBDA-screens/05-Organization-Admin/03-Team |
+| 7 | Organization Admin: configuration, templates, event rules, SLAs, delivery reports (backend first, then screens) | Queued | L | Real SLA numbers (OI-04) |
+| 8 | Moderation module (backend first, then its screens) | Queued | L | Rules for holds and appeals (OI-09) |
+| 9 | Support tickets, callbacks and chat (backend first, then screens); includes the Technical ticket opened by "This wasn't me" | Queued | L | Confirm screens from BBDA-screens/03-Support/03-Conversations |
+| 10 | Reporting and KPI module, then dashboards | Queued | L | Which numbers matter for the dashboard |
+| 11 | Audit read endpoints and log viewer | Queued | M | None |
+| 12 | Donor map and search (backend first, then screens) | Queued | L | Map provider and privacy rules (OI-16, OI-27, OI-28) |
+| 13 | Auth hardening and remaining P1-I1 sign-in flows: JWT claims and key rotation, device-bound refresh, step-up, role-scoped grants, denied-attempt audit, forgot and reset password, change password, SMS-code sign-in, sessions and login activity, security alerts (NTF-EV-21), realtime handshake, areas and facilities reads, migrations 0034 and 0035 | Done | L | Full suite passed on PostgreSQL 18 with PostGIS (OI-34 resolved); review `docs/decisions/identity-assumptions.md` |
+| 14 | Data-access layer (ADR-16): `drizzle-orm` installed; schema files generated for every module with a drift check; identity, request, configuration, appointments, the outbox and notification moved to the ORM (notification reads identity, request and case data through their read models; push-token write moved to identity). Remaining: matching and case workflow (lock-heavy, cross-module), one module per pull request | In progress | L | None; approved 14 Oct 2026 |
+| 15 | Identity leftovers: account recovery requests with Support review and cooling-off, phone number change, unlock endpoints for Support and Administrator, risk flags NEW_REGION and IMPOSSIBLE_TRAVEL from sign-in location, staff bound-device limit, Administrator alert on staff password reset (NTF-EV-23) | Queued | L | Sign-in location consent text (OI-15); recovery evidence standard |
+| 16 | Realtime fan-out: publish case, queue and inbox events to `user:<id>` rooms from the outbox relay | Queued | M | None |
+| 17 | Redis-backed rate limits and lockout counters replacing the PostgreSQL counts (OI-33) | Queued | S | Redis provisioned per environment |
+| 18 | Public users on the web (ADR-15 Amendment 1): donor and patient screens on the web are built for the core flows (home, requests, invitations, appointments, notifications, profile, consent). Patient request flow matches the prototype: active request with four milestones, aggregate search counts and timeline; new request and draft editing; drafts; request history with outcome confidence; update request (non-material applied, material sent to Support); cancel with reason; report an urgent problem. Synthetic demo data in `services/backend/seeds/patient-flow-demo.sql`. Notifications inbox: unread count, mark all as read, and a Date or Type view with a section and count per category (category sent by the server). Support approval of pending changes with search recheck and NTF-EV-13 to affected donors (FR-REQ-015) is done. Still to do: the urgent-problem alert to the agent (OI-38), a queue view for requests with pending changes, and document upload. Still to do: tickets and chat, callbacks, representatives, the rest of the menu, the Flutter mobile app for the same roles (ADR-02), and the release decision on OI-35 | In progress | L | Approval of the Flutter packages (supply-chain rule); OI-35 before release |
+
+## Working rules
+
+- Items 1 to 3 can start without the prototype. Items 5 and 6 are the first visible portal screens, because their backend is mostly built.
+- Items 7 to 12 each need backend work before their screens. Each is therefore two steps, delivered separately.
+- If an item is blocked, the next item in order starts only when it does not depend on the blocked one. Blocked items are reported at the top of each update.
+- Architecture, permission, privacy and authentication changes still need human approval in chat, even when an item is otherwise approved.

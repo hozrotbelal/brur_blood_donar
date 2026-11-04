@@ -8,7 +8,7 @@ You are working on BBDA, a mobile-first blood donor coordination system: one Flu
 - `docs/modules/<module>.md` for the module you are changing
 - `docs/adr/` (decisions are binding)
 - `docs/decisions/open-issues.md` (never guess an open item)
-- `docs/source-documents/` (BRD, SRS, architecture, data model, workflows) for detail
+- `docs/source-documents/` (00 index and traceability, BRD, SRS, architecture, data model, workflows, and the Agent Based Development notes) for detail
 
 ## Non-negotiable product rules
 
@@ -17,7 +17,7 @@ You are working on BBDA, a mobile-first blood donor coordination system: one Flu
 - No patient-scoped API may return donor identity, shortlist, contact or health data.
 - Donor phone numbers and exact location are revealed only through a time-limited, logged reveal grant. Store and show approximate location by default. Never export donor phone numbers.
 - Sign-in location is used only for account security, never for matching or maps.
-- There is no web admin panel. All administration lives in the Administrator shell of the mobile app.
+- Staff (Support, Moderation, Administrator) use the web portal in `apps/web` and the mobile app. Donors, patients and representatives use the mobile app and the web (ADR-15, Amendment 1). Browser sign-in follows ADR-15. Do not add any other web surface without a new ADR.
 - Exactly five roles. Tiers are permission sets inside roles, not new roles.
 - Every user-visible string exists in Bangla and English.
 
@@ -27,6 +27,7 @@ You are working on BBDA, a mobile-first blood donor coordination system: one Flu
 - Business logic lives on the server, never in the mobile app. State machines are server-side; clients send commands, not statuses.
 - All authorization goes through the shared policy component. Never grant, widen or bypass permissions without human approval.
 - Every mutating API call requires an `Idempotency-Key`. Use unique constraints and dedupe keys so retries never create duplicate invitations, cases or SMS.
+- Data access goes through Drizzle ORM and the module's generated `schema.ts` (ADR-16). Never edit a `schema.ts` or `platform/db/enums.ts` by hand: change a migration, then run `npm run schema:generate` in the same pull request. Raw SQL only for the cases listed in `docs/architecture/database-guidelines.md`, with the reason stated in the service.
 - Events are written to the outbox in the same transaction as the change.
 - Every status change writes `status_history` and an `audit_event`.
 - No new API without updating the OpenAPI spec. Migrations follow expand-and-contract.

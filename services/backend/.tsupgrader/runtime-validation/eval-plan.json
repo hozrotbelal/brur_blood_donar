@@ -1,0 +1,62 @@
+{
+  "projectType": "server",
+  "setup": [
+    {
+      "command": "npm",
+      "args": [
+        "run",
+        "build"
+      ],
+      "timeoutSeconds": 180
+    }
+  ],
+  "assertions": [
+    {
+      "name": "tests-pass",
+      "kind": "process",
+      "command": "npm",
+      "args": [
+        "test"
+      ],
+      "verificationMethod": "test-results",
+      "expected": "0",
+      "timeoutSeconds": 300
+    },
+    {
+      "name": "health-endpoint-database-unavailable",
+      "kind": "http-probe",
+      "startCommand": "npm",
+      "startArgs": [
+        "run",
+        "start:api"
+      ],
+      "env": {
+        "NODE_ENV": "test",
+        "PORT": "49371",
+        "DATABASE_URL": "postgres://bbda_test:bbda_test@127.0.0.1:1/bbda_test"
+      },
+      "url": "http://127.0.0.1:49371/api/v1/health",
+      "verificationMethod": "http-status",
+      "expected": "503",
+      "timeoutSeconds": 60
+    },
+    {
+      "name": "openapi-endpoint-200",
+      "kind": "http-probe",
+      "startCommand": "npm",
+      "startArgs": [
+        "run",
+        "start:api"
+      ],
+      "env": {
+        "NODE_ENV": "test",
+        "PORT": "49371",
+        "DATABASE_URL": "postgres://bbda_test:bbda_test@127.0.0.1:1/bbda_test"
+      },
+      "url": "http://127.0.0.1:49371/api/v1/openapi.json",
+      "verificationMethod": "http-status",
+      "expected": "200",
+      "timeoutSeconds": 60
+    }
+  ]
+}

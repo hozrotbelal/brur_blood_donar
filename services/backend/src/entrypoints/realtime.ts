@@ -3,10 +3,14 @@ import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
 import { IoAdapter } from '@nestjs/platform-socket.io';
 import { Module } from '@nestjs/common';
+import { IdentityCoreModule } from '../modules/identity/identity.public';
+import { AuditPlatformModule } from '../platform/audit/audit.module';
 import { loadConfig } from '../platform/config/app-config';
+import { DatabaseModule } from '../platform/db/database.module';
 import { RealtimeGateway } from '../platform/http/realtime.gateway';
+import { OutboxModule } from '../platform/outbox/outbox.module';
 
-@Module({ providers: [RealtimeGateway] })
+@Module({ imports: [DatabaseModule, OutboxModule, AuditPlatformModule, IdentityCoreModule], providers: [RealtimeGateway] })
 class RealtimeModule {}
 
 async function bootstrap() {

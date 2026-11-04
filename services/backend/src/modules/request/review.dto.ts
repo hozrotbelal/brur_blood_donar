@@ -28,6 +28,14 @@ export class RejectRequestDto {
 }
 
 
+export class DecideChangeDto {
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(500) note?: string;
+}
+
+export class RejectChangeDto {
+  @ApiProperty() @IsString() @MinLength(5) @MaxLength(500) reason!: string;
+}
+
 export class PauseOutreachDto {
   @ApiProperty() @IsString() @MinLength(5) @MaxLength(500) reason!: string;
 }

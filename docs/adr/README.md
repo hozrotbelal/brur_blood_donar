@@ -14,5 +14,7 @@
 - [ADR-12 Permission-set authorization inside five roles](ADR-12-permission-set-authorization-inside-five.md)
 - [ADR-13 Time-limited reveal grants for phone and exact location](ADR-13-time-limited-reveal-grants-for.md)
 - [ADR-14 Separate purposes for sign-in location and donor location](ADR-14-separate-purposes-for-sign-in.md)
+- [ADR-15 Staff web portal (partly supersedes ADR-09)](ADR-15-staff-web-portal.md)
+- [ADR-16 Typed data access with Drizzle ORM over SQL migrations (proposed, awaiting approval)](ADR-16-data-access-layer.md)
 
 New or changed decisions: add a new ADR file, get human approval, and never edit an accepted ADR silently.

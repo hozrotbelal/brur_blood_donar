@@ -9,7 +9,8 @@ import { AuthService } from '../../src/modules/identity/auth.service';
 import { DonorService, insideBangladesh, newDonorCode, nextContactDate } from '../../src/modules/identity/donor.service';
 import { PasswordService } from '../../src/modules/identity/password.service';
 import { SmsSender } from '../../src/modules/identity/sms.port';
-import { TokenService } from '../../src/modules/identity/token.service';
+import { TokenService } from '../../src/platform/security/token.service';
+import { buildAuth, setupTokenOf, testDevice } from './identity-harness';
 
 const url = process.env.TEST_DATABASE_URL;
 const suite = url ? describe : describe.skip;
@@ -46,11 +47,11 @@ suite('donor profile and consent (needs TEST_DATABASE_URL with all migrations ap
   async function newDonorUser(): Promise<Principal> {
     const p = phone();
     const { challengeId } = await auth.register({ phone: p, role: 'DON', language: 'bn' });
-    const { setupToken } = await auth.verifyOtp({ challengeId, code: sms.last, role: 'DON', language: 'bn' });
+    const setupToken = setupTokenOf(await auth.verifyOtp({ challengeId, code: sms.last, role: 'DON', language: 'bn' }));
     await auth.setPassword({
       setupToken,
       password: 'correct horse battery',
-      device: { installId: randomUUID(), platform: 'android', model: 'T', osVersion: '14', appVersion: '1' },
+      device: testDevice(),
     });
     const row = await db.query<{ id: string }>('SELECT id FROM idn.app_user WHERE phone_e164 = $1', [`+880${p.slice(1)}`]);
     const userId = row.rows[0].id;
@@ -62,7 +63,7 @@ suite('donor profile and consent (needs TEST_DATABASE_URL with all migrations ap
     const tokens = new TokenService({ nodeEnv: 'test', jwtPrivateKeyPath: '' } as AppConfig);
     const outbox = new OutboxService();
     const audit = new AuditService(outbox);
-    auth = new AuthService(db, new PasswordService(), tokens, sms, outbox, audit);
+    auth = buildAuth(db, tokens, sms, outbox, audit);
     donors = new DonorService(db, new StatusHistoryService(audit), outbox);
   });
   afterAll(() => db.onModuleDestroy());

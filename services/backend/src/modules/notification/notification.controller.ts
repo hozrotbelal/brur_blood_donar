@@ -1,9 +1,11 @@
 import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Put, Query, Req } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { IsNotEmpty, IsString, MaxLength } from 'class-validator';
 import { RequirePermission } from '../../platform/policy/policy.guard';
 import { Principal, SCOPE_ORDER } from '../../platform/policy/policy.types';
 import { NotificationService } from './notification.service';
+import { NotificationItemDto } from './notification-view.dto';
+import { UnreadCountDto } from './notification-view.dto';
 
 interface Req {
   principal: Principal;
@@ -20,12 +22,12 @@ class PushTokenDto {
 export class NotificationController {
   constructor(private readonly notifications: NotificationService) {}
 
-  @Get('notifications') @RequirePermission('account.view', 'Own')
+  @Get('notifications') @RequirePermission('account.view', 'Own') @ApiResponse({ status: 200, type: [NotificationItemDto] })
   inbox(@Req() req: Req, @Query('unread') unread?: string, @Query('limit') limit?: string) {
     return this.notifications.inbox(req.principal, { unreadOnly: unread === 'true', limit: limit ? Number(limit) : undefined });
   }
 
-  @Get('notifications/unread-count') @RequirePermission('account.view', 'Own')
+  @Get('notifications/unread-count') @RequirePermission('account.view', 'Own') @ApiResponse({ status: 200, type: UnreadCountDto })
   unread(@Req() req: Req) {
     return this.notifications.unreadCount(req.principal);
   }

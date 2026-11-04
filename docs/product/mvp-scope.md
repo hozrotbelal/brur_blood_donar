@@ -41,7 +41,7 @@ Blood issuance to hospitals or patients (superseded).
 
 Hospital staff portal and any Blood Bank Staff or Hospital Coordinator app role (superseded).
 
-Web admin panel; all administration is done in the mobile app (superseded; a web console is a possible future option only).
+Donors, patients and representatives use the mobile app and the web (ADR-15, Amendment 1, 14 October 2026). The staff web portal for Support, Moderation and Administrator is in scope under ADR-15.
 
 Interactive voice response (IVR) (superseded).
 

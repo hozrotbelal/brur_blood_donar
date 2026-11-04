@@ -1,11 +1,10 @@
-import { Db } from '../db/database.service';
+import { fakeDb } from '../../../test/fake-db';
 import { EventBus } from './event-bus';
 import { OutboxService, outboxDedupeKey } from './outbox.service';
 
 describe('OutboxService', () => {
   it('writes through the caller transaction with a stable dedupe key', async () => {
-    const query = jest.fn().mockResolvedValue({ rows: [], rowCount: 1 });
-    const tx = { query } as unknown as Db;
+    const tx = fakeDb();
     await new OutboxService().append(tx, {
       aggregateType: 'BLOOD_REQUEST',
       aggregateId: 'r1',
@@ -13,8 +12,10 @@ describe('OutboxService', () => {
       payload: { a: 1 },
       version: 3,
     });
-    expect(query).toHaveBeenCalledTimes(1);
-    expect(query.mock.calls[0][1][4]).toBe('BLOOD_REQUEST:r1:RequestVerified:3');
+    expect(tx.statements).toHaveLength(1);
+    expect(tx.statements[0].text).toContain('insert into "platform"."outbox_event"');
+    expect(tx.statements[0].text).toContain('on conflict ("dedupe_key") do nothing');
+    expect(tx.statements[0].values).toContain('BLOOD_REQUEST:r1:RequestVerified:3');
     expect(outboxDedupeKey({ aggregateType: 'X', aggregateId: 'y', eventType: 'Z' })).toBe('X:y:Z:1');
   });
 });

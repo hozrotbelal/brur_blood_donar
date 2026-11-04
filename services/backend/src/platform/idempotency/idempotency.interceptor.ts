@@ -17,6 +17,7 @@ import { IDEMPOTENCY_REPOSITORY, IdempotencyRepository } from './idempotency.rep
 
 export const ANONYMOUS_USER_ID = '00000000-0000-0000-0000-000000000000';
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+const EXEMPT_PREFIXES = ['/api/v1/auth/', '/api/v1/web/auth/'];
 
 interface HttpRequest {
   method: string;
@@ -49,7 +50,8 @@ export class IdempotencyInterceptor implements NestInterceptor {
     if (context.getType() !== 'http') return next.handle();
     const http = context.switchToHttp();
     const request = http.getRequest<HttpRequest>();
-    if (!MUTATING.has(request.method)) return next.handle();
+    const path = request.url?.split('?')[0] ?? '';
+    if (!MUTATING.has(request.method) || EXEMPT_PREFIXES.some((prefix) => path.startsWith(prefix))) return next.handle();
 
     const header = request.headers['idempotency-key'];
     const key = Array.isArray(header) ? header[0] : header;

@@ -8,7 +8,8 @@ import { AuthService } from '../../src/modules/identity/auth.service';
 import { PasswordService } from '../../src/modules/identity/password.service';
 import { SmsSender } from '../../src/modules/identity/sms.port';
 import { StaffService } from '../../src/modules/identity/staff.service';
-import { TokenService } from '../../src/modules/identity/token.service';
+import { TokenService } from '../../src/platform/security/token.service';
+import { buildAuth, setupTokenOf, testDevice } from './identity-harness';
 
 const url = process.env.TEST_DATABASE_URL;
 const suite = url ? describe : describe.skip;
@@ -50,7 +51,7 @@ suite('staff invitation and role assignment (needs TEST_DATABASE_URL with all mi
     const outbox = new OutboxService();
     const audit = new AuditService(outbox);
     const passwords = new PasswordService();
-    auth = new AuthService(db, passwords, tokens, sms, outbox, audit);
+    auth = buildAuth(db, tokens, sms, outbox, audit, passwords);
     staff = new StaffService(db, passwords, sms, outbox, audit);
   });
   afterAll(() => db.onModuleDestroy());

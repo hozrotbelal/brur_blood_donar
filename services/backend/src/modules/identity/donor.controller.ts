@@ -1,9 +1,11 @@
 import { Body, Controller, Get, HttpCode, Param, ParseEnumPipe, ParseUUIDPipe, Post, Put, Req } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { RequirePermission } from '../../platform/policy/policy.guard';
 import { Principal } from '../../platform/policy/policy.types';
 import { CONSENT_TYPES, NOTIFICATION_CATEGORIES, ProposeLocationDto, SaveAvailabilityDto, SaveConsentDto, SaveDonorProfileDto, SaveNotificationPreferenceDto } from './donor.dto';
 import { DonorService } from './donor.service';
+import { DonorProfileDto } from './profile-view.dto';
+import { ConsentViewDto } from './profile-view.dto';
 
 interface Req {
   principal: Principal;
@@ -19,7 +21,7 @@ const category = new ParseEnumPipe(toEnum(NOTIFICATION_CATEGORIES));
 export class DonorController {
   constructor(private readonly donors: DonorService) {}
 
-  @Get('profiles/donor') @RequirePermission('donor_profile.view', 'Own')
+  @Get('profiles/donor') @RequirePermission('donor_profile.view', 'Own') @ApiResponse({ status: 200, type: DonorProfileDto })
   profile(@Req() req: Req) {
     return this.donors.getProfile(req.principal);
   }
@@ -54,7 +56,7 @@ export class DonorController {
     return this.donors.confirmLocation(req.principal, id);
   }
 
-  @Get('consents') @RequirePermission('consent.manage_own', 'Own')
+  @Get('consents') @RequirePermission('consent.manage_own', 'Own') @ApiResponse({ status: 200, type: [ConsentViewDto] })
   consents(@Req() req: Req) {
     return this.donors.listConsents(req.principal);
   }

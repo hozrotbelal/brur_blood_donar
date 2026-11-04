@@ -1,9 +1,9 @@
 import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Req } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { RequirePermission } from '../../platform/policy/policy.guard';
 import { Principal } from '../../platform/policy/policy.types';
 import { Public } from '../../platform/policy/public.decorator';
-import { AcceptStaffInvitationDto, ChangeAssignmentDto, InviteStaffDto } from './staff.dto';
+import { AcceptStaffInvitationDto, ChangeAssignmentDto, InviteStaffDto, StaffInvitationDto, StaffInvitationCreatedDto } from './staff.dto';
 import { StaffService } from './staff.service';
 
 interface Req {
@@ -16,12 +16,12 @@ interface Req {
 export class StaffController {
   constructor(private readonly staff: StaffService) {}
 
-  @Post('admin/staff-invitations') @HttpCode(201) @RequirePermission('staff.invite', 'All')
+  @Post('admin/staff-invitations') @HttpCode(201) @RequirePermission('staff.invite', 'All') @ApiOkResponse({ type: StaffInvitationCreatedDto })
   invite(@Body() dto: InviteStaffDto, @Req() req: Req) {
     return this.staff.invite(req.principal, dto);
   }
 
-  @Get('admin/staff-invitations') @RequirePermission('staff.invite', 'All')
+  @Get('admin/staff-invitations') @RequirePermission('staff.invite', 'All') @ApiOkResponse({ type: [StaffInvitationDto] })
   list(@Req() req: Req) {
     return this.staff.list(req.principal);
   }

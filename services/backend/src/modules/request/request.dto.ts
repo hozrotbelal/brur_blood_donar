@@ -26,6 +26,7 @@ export class CreateRequestDto {
   @ApiProperty({ example: '01712345678' }) @IsString() @Matches(/^[+0-9\s-]{8,20}$/) contactPhone!: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @Matches(/^[+0-9\s-]{8,20}$/) altContactPhone?: string;
   @ApiPropertyOptional() @IsOptional() @IsUUID() hospitalFacilityId?: string;
+  @ApiPropertyOptional() @IsOptional() @IsUUID() collectionFacilityId?: string;
   @ApiPropertyOptional() @IsOptional() @IsUUID() areaId?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(500) specialInstructions?: string;
   @ApiPropertyOptional({ enum: CONTACT_METHODS }) @IsOptional() @IsIn(CONTACT_METHODS) preferredSupportContact?: (typeof CONTACT_METHODS)[number];
@@ -38,4 +39,21 @@ export class CancelRequestDto {
 
 export class SupplyInformationDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(500) message?: string;
+}
+
+export class UpdateRequestDto {
+  @ApiPropertyOptional({ example: '01712345678' }) @IsOptional() @IsString() @Matches(/^[+0-9\s-]{8,20}$/) contactPhone?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @Matches(/^[+0-9\s-]{8,20}$/) altContactPhone?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(500) specialInstructions?: string;
+  @ApiPropertyOptional({ minimum: 1, maximum: 20 }) @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(20) quantityUnits?: number;
+  @ApiPropertyOptional() @IsOptional() @IsDateString() requiredBy?: string;
+  @ApiPropertyOptional({ enum: URGENCIES }) @IsOptional() @IsIn(URGENCIES) urgency?: (typeof URGENCIES)[number];
+  @ApiPropertyOptional() @IsOptional() @IsUUID() hospitalFacilityId?: string;
+  @ApiPropertyOptional() @IsOptional() @IsUUID() collectionFacilityId?: string;
+  @ApiPropertyOptional({ enum: BLOOD_GROUPS }) @IsOptional() @IsIn(BLOOD_GROUPS) requestedBloodGroup?: (typeof BLOOD_GROUPS)[number];
+  @ApiPropertyOptional({ enum: COMPONENTS }) @IsOptional() @IsIn(COMPONENTS) component?: (typeof COMPONENTS)[number];
+}
+
+export class UrgentProblemDto {
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(500) note?: string;
 }

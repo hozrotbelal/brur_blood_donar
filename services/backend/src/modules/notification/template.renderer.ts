@@ -33,3 +33,22 @@ export function formatTime(lang: Lang, when: Date): string {
     hour12: true,
   }).format(when);
 }
+
+const SECURITY_EVENT: Record<Lang, Record<string, string>> = {
+  en: {
+    PASSWORD_CHANGED: 'Password changed',
+    PASSWORD_RESET: 'Password reset',
+    NEW_DEVICE: 'Sign-in from a new device',
+    ACCOUNT_LOCKED: 'Account locked after repeated failed sign-ins',
+    SUSPICIOUS_SIGN_IN_REPORTED: 'Unknown sign-in reported and other devices signed out',
+  },
+  bn: {
+    PASSWORD_CHANGED: 'পাসওয়ার্ড পরিবর্তন হয়েছে',
+    PASSWORD_RESET: 'পাসওয়ার্ড রিসেট হয়েছে',
+    NEW_DEVICE: 'নতুন ডিভাইস থেকে সাইন-ইন',
+    ACCOUNT_LOCKED: 'বারবার ভুল সাইন-ইনের পর অ্যাকাউন্ট লক হয়েছে',
+    SUSPICIOUS_SIGN_IN_REPORTED: 'অজানা সাইন-ইন রিপোর্ট করা হয়েছে এবং অন্য ডিভাইসগুলো সাইন-আউট হয়েছে',
+  },
+};
+
+export const securityEventLabel = (lang: Lang, kind: string) => SECURITY_EVENT[lang][kind] ?? kind;

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Decision, PermissionScope, Principal, Resource, SCOPE_ORDER } from './policy.types';
+import { Decision, PermissionScope, Principal, Resource, SCOPE_ORDER, stepUpIsFresh } from './policy.types';
 
 const rank = (scope: PermissionScope) => SCOPE_ORDER.indexOf(scope);
 
@@ -23,6 +23,9 @@ export class PolicyService {
     if (options.resource && !this.resourceInScope(principal, widest, options.resource, options.principalAreaIds)) {
       return { allowed: false, permissionKey: key, reason: 'RESOURCE_OUT_OF_SCOPE' };
     }
+    if (live.some((g) => g.requiresStepUp) && !stepUpIsFresh(principal, now)) {
+      return { allowed: false, permissionKey: key, reason: 'STEP_UP_REQUIRED' };
+    }
     return { allowed: true, permissionKey: key, reason: 'GRANTED' };
   }
 
@@ -40,7 +43,9 @@ export class PolicyService {
       case 'All':
         return true;
       case 'Area':
-        return (resource.areaIds ?? []).some((a) => principalAreaIds.includes(a));
+        return (
+          (resource.areaIds ?? []).some((a) => principalAreaIds.includes(a)) || (resource.assignedUserIds ?? []).includes(principal.userId)
+        );
       case 'Assigned':
         return (resource.assignedUserIds ?? []).includes(principal.userId);
       case 'Own':

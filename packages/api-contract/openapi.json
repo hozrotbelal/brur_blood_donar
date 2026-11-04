@@ -1,0 +1,5895 @@
+{
+  "openapi": "3.0.0",
+  "paths": {
+    "/api/v1/health": {
+      "get": {
+        "operationId": "HealthController_check",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Health"
+        ]
+      }
+    },
+    "/api/v1/auth/register": {
+      "post": {
+        "operationId": "AuthController_register",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OtpChallengeDto"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/login-otp": {
+      "post": {
+        "operationId": "AuthController_loginOtp",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhoneDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Same response whether or not the number is registered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcceptedDto"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/verify-otp": {
+      "post": {
+        "operationId": "AuthController_verifyOtp",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyOtpDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/SetupTokenDto"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ResetTokenDto"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TokenPairDto"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/set-password": {
+      "post": {
+        "operationId": "AuthController_setPassword",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetPasswordDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenPairDto"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "operationId": "AuthController_login",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/TokenPairDto"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MfaChallengeDto"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/staff/verify-code": {
+      "post": {
+        "operationId": "AuthController_staffVerify",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StaffMfaDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenPairDto"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/refresh": {
+      "post": {
+        "operationId": "AuthController_refresh",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenPairDto"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/password/forgot": {
+      "post": {
+        "operationId": "AuthController_forgotPassword",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhoneDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Same response whether or not the number is registered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcceptedDto"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/password/reset": {
+      "post": {
+        "operationId": "AuthController_resetPassword",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetPasswordDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResetOutcomeDto"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/jwks": {
+      "get": {
+        "operationId": "AuthController_jwks",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Public keys for access-token verification (key rotation with overlapping validity)"
+          }
+        },
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/password/change": {
+      "post": {
+        "operationId": "AuthController_changePassword",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePasswordDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/step-up/challenge": {
+      "post": {
+        "operationId": "AuthController_stepUpChallenge",
+        "parameters": [],
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OtpChallengeDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/step-up": {
+      "post": {
+        "operationId": "AuthController_stepUp",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StepUpDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StepUpResultDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "operationId": "AuthController_logout",
+        "parameters": [],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/me": {
+      "get": {
+        "operationId": "AuthController_me",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/sessions": {
+      "get": {
+        "operationId": "SecurityController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "security"
+        ]
+      }
+    },
+    "/api/v1/auth/devices/{deviceId}/sign-out": {
+      "post": {
+        "operationId": "SecurityController_signOutDevice",
+        "parameters": [
+          {
+            "name": "deviceId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "security"
+        ]
+      }
+    },
+    "/api/v1/auth/sessions/sign-out-others": {
+      "post": {
+        "operationId": "SecurityController_signOutOthers",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "security"
+        ]
+      }
+    },
+    "/api/v1/security/login-activity": {
+      "get": {
+        "operationId": "SecurityController_loginActivity",
+        "parameters": [
+          {
+            "name": "limit",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "security"
+        ]
+      }
+    },
+    "/api/v1/security/login-activity/{id}/report": {
+      "post": {
+        "operationId": "SecurityController_report",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "security"
+        ]
+      }
+    },
+    "/api/v1/web/auth/login": {
+      "post": {
+        "operationId": "WebAuthController_login",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebLoginDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/WebMfaChallengeDto"
+                    },
+                    {
+                      "$ref": "#/components/schemas/WebSignedInDto"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "web-auth"
+        ]
+      }
+    },
+    "/api/v1/web/auth/staff/verify-code": {
+      "post": {
+        "operationId": "WebAuthController_verify",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebStaffVerifyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebSignedInDto"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "web-auth"
+        ]
+      }
+    },
+    "/api/v1/web/auth/refresh": {
+      "post": {
+        "operationId": "WebAuthController_refresh",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebSignedInDto"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "web-auth"
+        ]
+      }
+    },
+    "/api/v1/web/auth/logout": {
+      "post": {
+        "operationId": "WebAuthController_logout",
+        "parameters": [],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "web-auth"
+        ]
+      }
+    },
+    "/api/v1/profiles/donor": {
+      "get": {
+        "operationId": "DonorController_profile",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DonorProfileDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "donor"
+        ]
+      },
+      "put": {
+        "operationId": "DonorController_saveProfile",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveDonorProfileDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "donor"
+        ]
+      }
+    },
+    "/api/v1/profiles/donor/availability": {
+      "get": {
+        "operationId": "DonorController_availability",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "donor"
+        ]
+      },
+      "put": {
+        "operationId": "DonorController_saveAvailability",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveAvailabilityDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "donor"
+        ]
+      }
+    },
+    "/api/v1/profiles/donor/locations": {
+      "get": {
+        "operationId": "DonorController_locations",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "donor"
+        ]
+      },
+      "post": {
+        "operationId": "DonorController_proposeLocation",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProposeLocationDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "donor"
+        ]
+      }
+    },
+    "/api/v1/profiles/donor/locations/{id}/confirm": {
+      "post": {
+        "operationId": "DonorController_confirmLocation",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "donor"
+        ]
+      }
+    },
+    "/api/v1/consents": {
+      "get": {
+        "operationId": "DonorController_consents",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ConsentViewDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "donor"
+        ]
+      }
+    },
+    "/api/v1/consents/{type}": {
+      "put": {
+        "operationId": "DonorController_saveConsent",
+        "parameters": [
+          {
+            "name": "type",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveConsentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "donor"
+        ]
+      }
+    },
+    "/api/v1/notification-preferences": {
+      "get": {
+        "operationId": "DonorController_preferences",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "donor"
+        ]
+      }
+    },
+    "/api/v1/notification-preferences/{category}": {
+      "put": {
+        "operationId": "DonorController_savePreference",
+        "parameters": [
+          {
+            "name": "category",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveNotificationPreferenceDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "donor"
+        ]
+      }
+    },
+    "/api/v1/admin/staff-invitations": {
+      "post": {
+        "operationId": "StaffController_invite",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InviteStaffDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffInvitationCreatedDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "staff-admin"
+        ]
+      },
+      "get": {
+        "operationId": "StaffController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/StaffInvitationDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "staff-admin"
+        ]
+      }
+    },
+    "/api/v1/admin/staff-invitations/{id}/revoke": {
+      "post": {
+        "operationId": "StaffController_revoke",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "staff-admin"
+        ]
+      }
+    },
+    "/api/v1/admin/staff/{userId}/assignment": {
+      "post": {
+        "operationId": "StaffController_assign",
+        "parameters": [
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeAssignmentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "staff-admin"
+        ]
+      }
+    },
+    "/api/v1/auth/staff/accept-invitation": {
+      "post": {
+        "operationId": "StaffController_accept",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcceptStaffInvitationDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "staff-admin"
+        ]
+      }
+    },
+    "/api/v1/patients": {
+      "post": {
+        "operationId": "RequestController_createPatient",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePatientDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "requests"
+        ]
+      },
+      "get": {
+        "operationId": "RequestController_listPatients",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PatientListItemDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "requests"
+        ]
+      }
+    },
+    "/api/v1/requests": {
+      "post": {
+        "operationId": "RequestController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestViewDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "requests"
+        ]
+      },
+      "get": {
+        "operationId": "RequestController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RequestViewDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "requests"
+        ]
+      }
+    },
+    "/api/v1/requests/{id}": {
+      "get": {
+        "operationId": "RequestController_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestViewDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "requests"
+        ]
+      }
+    },
+    "/api/v1/requests/{id}/submit": {
+      "post": {
+        "operationId": "RequestController_submit",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestViewDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "requests"
+        ]
+      }
+    },
+    "/api/v1/requests/{id}/cancel": {
+      "post": {
+        "operationId": "RequestController_cancel",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestViewDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "requests"
+        ]
+      }
+    },
+    "/api/v1/requests/{id}/changes": {
+      "post": {
+        "operationId": "RequestController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestChangeResultDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "requests"
+        ]
+      },
+      "get": {
+        "operationId": "RequestController_changes",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RequestChangeDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "requests"
+        ]
+      }
+    },
+    "/api/v1/requests/{id}/progress": {
+      "get": {
+        "operationId": "RequestController_progress",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Aggregate search counts only",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestProgressDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "requests"
+        ]
+      }
+    },
+    "/api/v1/requests/{id}/urgent-problem": {
+      "post": {
+        "operationId": "RequestController_urgentProblem",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UrgentProblemDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestViewDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "requests"
+        ]
+      }
+    },
+    "/api/v1/requests/{id}/supply-information": {
+      "post": {
+        "operationId": "RequestController_supply",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupplyInformationDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "requests"
+        ]
+      }
+    },
+    "/api/v1/requests/{id}/timeline": {
+      "get": {
+        "operationId": "RequestController_timeline",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TimelineEntryDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "requests"
+        ]
+      }
+    },
+    "/api/v1/staff/requests": {
+      "get": {
+        "operationId": "ReviewController_queue",
+        "parameters": [
+          {
+            "name": "status",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ReviewQueueItemDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "staff-review"
+        ]
+      }
+    },
+    "/api/v1/staff/requests/{id}": {
+      "get": {
+        "operationId": "ReviewController_detail",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewRequestDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "staff-review"
+        ]
+      }
+    },
+    "/api/v1/staff/requests/{id}/flags/{flagId}/resolve": {
+      "post": {
+        "operationId": "ReviewController_resolveFlag",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "flagId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveFlagDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "staff-review"
+        ]
+      }
+    },
+    "/api/v1/staff/requests/{id}/changes/{changeId}/approve": {
+      "post": {
+        "operationId": "ReviewController_approveChange",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "changeId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecideChangeDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewRequestDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "staff-review"
+        ]
+      }
+    },
+    "/api/v1/staff/requests/{id}/changes/{changeId}/reject": {
+      "post": {
+        "operationId": "ReviewController_rejectChange",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "changeId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectChangeDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewRequestDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "staff-review"
+        ]
+      }
+    },
+    "/api/v1/staff/requests/{id}/pause-outreach": {
+      "post": {
+        "operationId": "ReviewController_pauseOutreach",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PauseOutreachDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "staff-review"
+        ]
+      }
+    },
+    "/api/v1/staff/requests/{id}/resume-outreach": {
+      "post": {
+        "operationId": "ReviewController_resumeOutreach",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "staff-review"
+        ]
+      }
+    },
+    "/api/v1/staff/requests/{id}/pick-up": {
+      "post": {
+        "operationId": "ReviewController_pickUp",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewQueueItemDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "staff-review"
+        ]
+      }
+    },
+    "/api/v1/staff/requests/{id}/request-information": {
+      "post": {
+        "operationId": "ReviewController_requestInformation",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestInformationDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewQueueItemDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "staff-review"
+        ]
+      }
+    },
+    "/api/v1/staff/requests/{id}/verify": {
+      "post": {
+        "operationId": "ReviewController_verify",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewQueueItemDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "staff-review"
+        ]
+      }
+    },
+    "/api/v1/staff/requests/{id}/reject": {
+      "post": {
+        "operationId": "ReviewController_reject",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewQueueItemDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "staff-review"
+        ]
+      }
+    },
+    "/api/v1/staff/requests/{id}/waves": {
+      "get": {
+        "operationId": "MatchingController_waves",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "matching"
+        ]
+      },
+      "post": {
+        "operationId": "MatchingController_expand",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "matching"
+        ]
+      }
+    },
+    "/api/v1/staff/waves/{id}/approve": {
+      "post": {
+        "operationId": "MatchingController_approve",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveWaveDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "matching"
+        ]
+      }
+    },
+    "/api/v1/invitations": {
+      "get": {
+        "operationId": "InvitationController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/InvitationViewDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "invitations"
+        ]
+      }
+    },
+    "/api/v1/invitations/{id}": {
+      "get": {
+        "operationId": "InvitationController_open",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "invitations"
+        ]
+      }
+    },
+    "/api/v1/invitations/{id}/respond": {
+      "post": {
+        "operationId": "InvitationController_respond",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RespondDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitationViewDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "invitations"
+        ]
+      }
+    },
+    "/api/v1/invitations/{id}/withdraw": {
+      "post": {
+        "operationId": "InvitationController_withdraw",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WithdrawInvitationDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "invitations"
+        ]
+      }
+    },
+    "/api/v1/staff/cases": {
+      "get": {
+        "operationId": "CaseController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CaseListItemDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "cases"
+        ]
+      }
+    },
+    "/api/v1/staff/cases/{id}": {
+      "get": {
+        "operationId": "CaseController_detail",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "cases"
+        ]
+      }
+    },
+    "/api/v1/staff/cases/{id}/start-scheduling": {
+      "post": {
+        "operationId": "CaseController_start",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "cases"
+        ]
+      }
+    },
+    "/api/v1/staff/cases/{id}/notes": {
+      "post": {
+        "operationId": "CaseController_note",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoteDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "cases"
+        ]
+      }
+    },
+    "/api/v1/staff/cases/{id}/contact-attempts": {
+      "post": {
+        "operationId": "CaseController_contact",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContactAttemptDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "cases"
+        ]
+      }
+    },
+    "/api/v1/staff/cases/{id}/appointments": {
+      "post": {
+        "operationId": "CaseController_propose",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProposeAppointmentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "cases"
+        ]
+      }
+    },
+    "/api/v1/staff/appointments/{id}/reschedule": {
+      "post": {
+        "operationId": "CaseController_reschedule",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RescheduleDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "cases"
+        ]
+      }
+    },
+    "/api/v1/staff/appointments/{id}/no-show": {
+      "post": {
+        "operationId": "CaseController_noShow",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "cases"
+        ]
+      }
+    },
+    "/api/v1/staff/cases/{id}/outcomes": {
+      "post": {
+        "operationId": "CaseController_outcome",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordOutcomeDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "cases"
+        ]
+      }
+    },
+    "/api/v1/staff/cases/{id}/outcomes/{outcomeId}/dispute": {
+      "post": {
+        "operationId": "CaseController_dispute",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "outcomeId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DisputeOutcomeDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "cases"
+        ]
+      }
+    },
+    "/api/v1/staff/cases/{id}/outcomes/{outcomeId}/resolve-dispute": {
+      "post": {
+        "operationId": "CaseController_resolveDispute",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "outcomeId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveDisputeDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "cases"
+        ]
+      }
+    },
+    "/api/v1/staff/cases/{id}/fulfilment": {
+      "post": {
+        "operationId": "CaseController_fulfilment",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "cases"
+        ]
+      }
+    },
+    "/api/v1/staff/cases/{id}/more-donors": {
+      "post": {
+        "operationId": "CaseController_moreDonors",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MoreDonorsDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "cases"
+        ]
+      }
+    },
+    "/api/v1/staff/requests/{id}/declare-unable": {
+      "post": {
+        "operationId": "CaseController_declareUnable",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeclareUnableDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "cases"
+        ]
+      }
+    },
+    "/api/v1/staff/cases/{id}/close": {
+      "post": {
+        "operationId": "CaseController_close",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CloseCaseDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "cases"
+        ]
+      }
+    },
+    "/api/v1/appointments": {
+      "get": {
+        "operationId": "DonorAppointmentController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DonorAppointmentDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "appointments"
+        ]
+      }
+    },
+    "/api/v1/appointments/{id}/confirm": {
+      "post": {
+        "operationId": "DonorAppointmentController_confirm",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "appointments"
+        ]
+      }
+    },
+    "/api/v1/appointments/{id}/timing-problem": {
+      "post": {
+        "operationId": "DonorAppointmentController_timing",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TimingProblemDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "appointments"
+        ]
+      }
+    },
+    "/api/v1/appointments/{id}/report-donation": {
+      "post": {
+        "operationId": "DonorAppointmentController_donated",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "appointments"
+        ]
+      }
+    },
+    "/api/v1/notifications": {
+      "get": {
+        "operationId": "NotificationController_inbox",
+        "parameters": [
+          {
+            "name": "unread",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/NotificationItemDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/api/v1/notifications/unread-count": {
+      "get": {
+        "operationId": "NotificationController_unread",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnreadCountDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/api/v1/notifications/read-all": {
+      "post": {
+        "operationId": "NotificationController_readAll",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/api/v1/notifications/{id}/read": {
+      "post": {
+        "operationId": "NotificationController_read",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/api/v1/notifications/{id}/receipt": {
+      "post": {
+        "operationId": "NotificationController_receipt",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/api/v1/devices/push-token": {
+      "put": {
+        "operationId": "NotificationController_pushToken",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PushTokenDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/api/v1/admin/delivery-reports": {
+      "get": {
+        "operationId": "NotificationController_report",
+        "parameters": [
+          {
+            "name": "days",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/api/v1/facilities": {
+      "get": {
+        "operationId": "FacilityController_list",
+        "parameters": [
+          {
+            "name": "areaId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "type",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "HOSPITAL",
+                "COLLECTION_SERVICE",
+                "CAMPAIGN_SITE"
+              ]
+            }
+          },
+          {
+            "name": "q",
+            "required": false,
+            "in": "query",
+            "description": "Matches English or Bangla name",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "maximum": 200,
+              "default": 50,
+              "type": "number"
+            }
+          },
+          {
+            "name": "offset",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 0,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Active facilities; any signed-in user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FacilityPageDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "reference-data"
+        ]
+      }
+    },
+    "/api/v1/areas": {
+      "get": {
+        "operationId": "AreaController_list",
+        "parameters": [
+          {
+            "name": "level",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "DIVISION",
+                "DISTRICT",
+                "UPAZILA",
+                "UNION"
+              ]
+            }
+          },
+          {
+            "name": "parentId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "required": false,
+            "in": "query",
+            "description": "Matches code, English or Bangla name",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "maximum": 200,
+              "default": 50,
+              "type": "number"
+            }
+          },
+          {
+            "name": "offset",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": 0,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Active areas; any signed-in user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AreaPageDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "reference-data"
+        ]
+      }
+    }
+  },
+  "info": {
+    "title": "BBDA API",
+    "description": "",
+    "version": "1",
+    "contact": {}
+  },
+  "tags": [],
+  "servers": [],
+  "components": {
+    "securitySchemes": {
+      "bearer": {
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "type": "http"
+      }
+    },
+    "schemas": {
+      "SetupTokenDto": {
+        "type": "object",
+        "properties": {
+          "setupToken": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "setupToken"
+        ]
+      },
+      "ResetTokenDto": {
+        "type": "object",
+        "properties": {
+          "resetToken": {
+            "type": "string"
+          },
+          "expiresInSeconds": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "resetToken",
+          "expiresInSeconds"
+        ]
+      },
+      "TokenPairDto": {
+        "type": "object",
+        "properties": {
+          "accessToken": {
+            "type": "string"
+          },
+          "refreshToken": {
+            "type": "string"
+          },
+          "expiresIn": {
+            "type": "number"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "DON",
+              "PAT",
+              "SUP",
+              "MOD",
+              "ADM"
+            ]
+          }
+        },
+        "required": [
+          "accessToken",
+          "refreshToken",
+          "expiresIn",
+          "role"
+        ]
+      },
+      "MfaChallengeDto": {
+        "type": "object",
+        "properties": {
+          "mfaRequired": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "challengeId": {
+            "type": "string"
+          },
+          "expiresInSeconds": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "mfaRequired",
+          "challengeId",
+          "expiresInSeconds"
+        ]
+      },
+      "RegisterDto": {
+        "type": "object",
+        "properties": {
+          "phone": {
+            "type": "string",
+            "example": "01712345678"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "DON",
+              "PAT"
+            ]
+          },
+          "language": {
+            "type": "string",
+            "enum": [
+              "bn",
+              "en"
+            ]
+          }
+        },
+        "required": [
+          "phone",
+          "role",
+          "language"
+        ]
+      },
+      "OtpChallengeDto": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string"
+          },
+          "expiresInSeconds": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "challengeId",
+          "expiresInSeconds"
+        ]
+      },
+      "PhoneDto": {
+        "type": "object",
+        "properties": {
+          "phone": {
+            "type": "string",
+            "example": "01712345678"
+          }
+        },
+        "required": [
+          "phone"
+        ]
+      },
+      "AcceptedDto": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          }
+        },
+        "required": [
+          "accepted"
+        ]
+      },
+      "DeviceDto": {
+        "type": "object",
+        "properties": {
+          "installId": {
+            "type": "string"
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "android",
+              "ios"
+            ]
+          },
+          "model": {
+            "type": "string"
+          },
+          "osVersion": {
+            "type": "string"
+          },
+          "appVersion": {
+            "type": "string"
+          },
+          "isRooted": {
+            "type": "boolean"
+          },
+          "publicKey": {
+            "type": "string",
+            "description": "P-256 public key (SPKI PEM) generated on the device; refresh and step-up proofs are signed with its private key"
+          }
+        },
+        "required": [
+          "installId",
+          "platform",
+          "model",
+          "osVersion",
+          "appVersion",
+          "publicKey"
+        ]
+      },
+      "VerifyOtpDto": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "example": "123456"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "DON",
+              "PAT"
+            ],
+            "description": "Registration and SMS-code sign-in"
+          },
+          "language": {
+            "type": "string",
+            "enum": [
+              "bn",
+              "en"
+            ],
+            "description": "Registration only"
+          },
+          "device": {
+            "description": "SMS-code sign-in only",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DeviceDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "challengeId",
+          "code"
+        ]
+      },
+      "SetPasswordDto": {
+        "type": "object",
+        "properties": {
+          "setupToken": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          },
+          "device": {
+            "$ref": "#/components/schemas/DeviceDto"
+          }
+        },
+        "required": [
+          "setupToken",
+          "password",
+          "device"
+        ]
+      },
+      "LoginDto": {
+        "type": "object",
+        "properties": {
+          "phone": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "DON",
+              "PAT"
+            ]
+          },
+          "device": {
+            "$ref": "#/components/schemas/DeviceDto"
+          }
+        },
+        "required": [
+          "phone",
+          "password",
+          "device"
+        ]
+      },
+      "StaffMfaDto": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "example": "123456"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "SUP",
+              "MOD",
+              "ADM"
+            ]
+          },
+          "device": {
+            "$ref": "#/components/schemas/DeviceDto"
+          }
+        },
+        "required": [
+          "challengeId",
+          "code",
+          "device"
+        ]
+      },
+      "DeviceProofDto": {
+        "type": "object",
+        "properties": {
+          "timestamp": {
+            "type": "number",
+            "description": "Unix time in milliseconds when the proof was signed; must be within 5 minutes of server time"
+          },
+          "signature": {
+            "type": "string",
+            "description": "ES256 signature (base64url, IEEE P1363) over bbda:<kind>:<subject>:<timestamp>"
+          }
+        },
+        "required": [
+          "timestamp",
+          "signature"
+        ]
+      },
+      "RefreshDto": {
+        "type": "object",
+        "properties": {
+          "refreshToken": {
+            "type": "string"
+          },
+          "proof": {
+            "description": "Required for devices registered with a public key; subject is the refresh token",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DeviceProofDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "refreshToken"
+        ]
+      },
+      "ResetPasswordDto": {
+        "type": "object",
+        "properties": {
+          "resetToken": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          },
+          "device": {
+            "$ref": "#/components/schemas/DeviceDto"
+          }
+        },
+        "required": [
+          "resetToken",
+          "password",
+          "device"
+        ]
+      },
+      "ResetOutcomeDto": {
+        "type": "object",
+        "properties": {
+          "signedIn": {
+            "type": "boolean",
+            "description": "False for staff, who must sign in again with the 2-step flow"
+          },
+          "tokens": {
+            "$ref": "#/components/schemas/TokenPairDto"
+          }
+        },
+        "required": [
+          "signedIn"
+        ]
+      },
+      "ChangePasswordDto": {
+        "type": "object",
+        "properties": {
+          "currentPassword": {
+            "type": "string"
+          },
+          "newPassword": {
+            "type": "string"
+          },
+          "signOutOtherDevices": {
+            "type": "boolean",
+            "default": true
+          }
+        },
+        "required": [
+          "currentPassword",
+          "newPassword"
+        ]
+      },
+      "StepUpDto": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "description": "SMS code step-up (web, or mobile fallback)"
+          },
+          "code": {
+            "type": "string",
+            "example": "123456"
+          },
+          "proof": {
+            "description": "Device-key step-up after biometric or PIN unlock; subject is the session id",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DeviceProofDto"
+              }
+            ]
+          }
+        }
+      },
+      "StepUpResultDto": {
+        "type": "object",
+        "properties": {
+          "stepUpValidUntil": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stepUpValidUntil"
+        ]
+      },
+      "MeGrantDto": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "Own",
+              "Assigned",
+              "Area",
+              "All"
+            ]
+          },
+          "requiresStepUp": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "key",
+          "scope",
+          "requiresStepUp"
+        ]
+      },
+      "MeDto": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "DON",
+              "PAT",
+              "SUP",
+              "MOD",
+              "ADM"
+            ]
+          },
+          "displayName": {
+            "type": "string",
+            "nullable": true
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "stepUpValidUntil": {
+            "type": "object",
+            "nullable": true
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MeGrantDto"
+            }
+          }
+        },
+        "required": [
+          "userId",
+          "role",
+          "roles",
+          "permissions"
+        ]
+      },
+      "WebMfaChallengeDto": {
+        "type": "object",
+        "properties": {
+          "mfaRequired": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "challengeId": {
+            "type": "string"
+          },
+          "expiresInSeconds": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "mfaRequired",
+          "challengeId",
+          "expiresInSeconds"
+        ]
+      },
+      "WebSignedInDto": {
+        "type": "object",
+        "properties": {
+          "accessToken": {
+            "type": "string",
+            "description": "Short-lived access token; keep in memory only"
+          },
+          "expiresIn": {
+            "type": "number"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "SUP",
+              "MOD",
+              "ADM",
+              "DON",
+              "PAT"
+            ]
+          },
+          "csrfToken": {
+            "type": "string",
+            "description": "Send back in the X-CSRF-Token header on refresh and logout"
+          }
+        },
+        "required": [
+          "accessToken",
+          "expiresIn",
+          "role",
+          "csrfToken"
+        ]
+      },
+      "WebLoginDto": {
+        "type": "object",
+        "properties": {
+          "phone": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "SUP",
+              "MOD",
+              "ADM",
+              "DON",
+              "PAT"
+            ],
+            "description": "Staff roles use the staff portal; DON and PAT are public users (ADR-15 Amendment 1)"
+          }
+        },
+        "required": [
+          "phone",
+          "password"
+        ]
+      },
+      "WebStaffVerifyDto": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "example": "123456"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "SUP",
+              "MOD",
+              "ADM"
+            ]
+          },
+          "trustBrowser": {
+            "type": "boolean",
+            "description": "Skip the SMS code on this browser until the trusted-browser period ends"
+          }
+        },
+        "required": [
+          "challengeId",
+          "code"
+        ]
+      },
+      "ApproximateLocationDto": {
+        "type": "object",
+        "properties": {
+          "latitude": {
+            "type": "number"
+          },
+          "longitude": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "latitude",
+          "longitude"
+        ]
+      },
+      "DonorProfileDto": {
+        "type": "object",
+        "properties": {
+          "donorCode": {
+            "type": "string"
+          },
+          "bloodGroup": {
+            "type": "string",
+            "nullable": true
+          },
+          "bloodGroupStatus": {
+            "type": "string"
+          },
+          "areaId": {
+            "type": "string",
+            "nullable": true
+          },
+          "travelRadiusKm": {
+            "type": "number"
+          },
+          "lastDonationDate": {
+            "type": "string",
+            "nullable": true,
+            "format": "date"
+          },
+          "provisionalNextContactDate": {
+            "type": "string",
+            "nullable": true,
+            "format": "date"
+          },
+          "nextContactBasis": {
+            "type": "string"
+          },
+          "donorStatus": {
+            "type": "string"
+          },
+          "locationSource": {
+            "type": "string"
+          },
+          "approximateLocation": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ApproximateLocationDto"
+              }
+            ]
+          },
+          "version": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "donorCode",
+          "bloodGroupStatus",
+          "travelRadiusKm",
+          "nextContactBasis",
+          "donorStatus",
+          "locationSource",
+          "version"
+        ]
+      },
+      "SaveDonorProfileDto": {
+        "type": "object",
+        "properties": {
+          "bloodGroup": {
+            "type": "string",
+            "enum": [
+              "A+",
+              "A-",
+              "B+",
+              "B-",
+              "AB+",
+              "AB-",
+              "O+",
+              "O-"
+            ]
+          },
+          "areaId": {
+            "type": "string"
+          },
+          "travelRadiusKm": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "lastDonationDate": {
+            "type": "string",
+            "description": "Self-reported; cannot be in the future"
+          }
+        },
+        "required": [
+          "bloodGroup"
+        ]
+      },
+      "SaveAvailabilityDto": {
+        "type": "object",
+        "properties": {
+          "routineAvailable": {
+            "type": "boolean"
+          },
+          "urgentAvailable": {
+            "type": "boolean"
+          },
+          "pausedUntil": {
+            "type": "object",
+            "nullable": true
+          },
+          "contactStart": {
+            "type": "string",
+            "example": "08:00"
+          },
+          "contactEnd": {
+            "type": "string",
+            "example": "21:00"
+          },
+          "contactDays": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "MON",
+                "TUE",
+                "WED",
+                "THU",
+                "FRI",
+                "SAT",
+                "SUN"
+              ]
+            }
+          }
+        },
+        "required": [
+          "routineAvailable",
+          "urgentAvailable",
+          "contactStart",
+          "contactEnd",
+          "contactDays"
+        ]
+      },
+      "ProposeLocationDto": {
+        "type": "object",
+        "properties": {
+          "latitude": {
+            "type": "number"
+          },
+          "longitude": {
+            "type": "number"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "DEVICE_SHARED",
+              "MANUAL_PICK"
+            ]
+          },
+          "accuracyM": {
+            "type": "number"
+          },
+          "gridSizeM": {
+            "type": "number",
+            "minimum": 500,
+            "maximum": 5000,
+            "default": 1000
+          }
+        },
+        "required": [
+          "latitude",
+          "longitude",
+          "source"
+        ]
+      },
+      "ConsentViewDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "granted": {
+            "type": "boolean"
+          },
+          "policyVersion": {
+            "type": "string"
+          },
+          "capturedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "granted",
+          "policyVersion",
+          "capturedAt",
+          "channel",
+          "language"
+        ]
+      },
+      "SaveConsentDto": {
+        "type": "object",
+        "properties": {
+          "granted": {
+            "type": "boolean"
+          },
+          "policyVersion": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string",
+            "enum": [
+              "bn",
+              "en"
+            ]
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "ONBOARDING",
+              "PROFILE_SETTINGS",
+              "INVITATION_PROMPT"
+            ]
+          }
+        },
+        "required": [
+          "granted",
+          "policyVersion",
+          "language"
+        ]
+      },
+      "SaveNotificationPreferenceDto": {
+        "type": "object",
+        "properties": {
+          "pushEnabled": {
+            "type": "boolean"
+          },
+          "smsEnabled": {
+            "type": "boolean"
+          },
+          "inappEnabled": {
+            "type": "boolean"
+          },
+          "quietStart": {
+            "type": "object",
+            "nullable": true
+          },
+          "quietEnd": {
+            "type": "object",
+            "nullable": true
+          }
+        },
+        "required": [
+          "pushEnabled",
+          "smsEnabled",
+          "inappEnabled"
+        ]
+      },
+      "InviteStaffDto": {
+        "type": "object",
+        "properties": {
+          "phone": {
+            "type": "string",
+            "example": "01712345678"
+          },
+          "roleCode": {
+            "type": "string",
+            "enum": [
+              "SUP",
+              "MOD",
+              "ADM"
+            ]
+          },
+          "tierCode": {
+            "type": "string",
+            "example": "TIER_SUPPORT_AGENT"
+          },
+          "areaIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "phone",
+          "roleCode",
+          "tierCode"
+        ]
+      },
+      "StaffInvitationCreatedDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "expiresInDays": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "expiresInDays"
+        ]
+      },
+      "StaffInvitationDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "phoneLast4": {
+            "type": "string",
+            "description": "Last four digits of the invited number"
+          },
+          "roleCode": {
+            "type": "string"
+          },
+          "tierCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "areaIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "acceptedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "phoneLast4",
+          "roleCode",
+          "tierCode",
+          "areaIds",
+          "status",
+          "expiresAt",
+          "createdAt",
+          "acceptedAt"
+        ]
+      },
+      "ChangeAssignmentDto": {
+        "type": "object",
+        "properties": {
+          "tierCode": {
+            "type": "string"
+          },
+          "areaIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tierCode",
+          "reason"
+        ]
+      },
+      "AcceptStaffInvitationDto": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string",
+            "enum": [
+              "bn",
+              "en"
+            ]
+          }
+        },
+        "required": [
+          "token",
+          "password",
+          "language"
+        ]
+      },
+      "CreatePatientDto": {
+        "type": "object",
+        "properties": {
+          "displayName": {
+            "type": "string"
+          },
+          "yearOfBirth": {
+            "type": "number"
+          },
+          "hospitalPatientRef": {
+            "type": "string"
+          },
+          "relationship": {
+            "type": "string",
+            "enum": [
+              "SELF",
+              "PARENT",
+              "CHILD",
+              "SPOUSE",
+              "SIBLING",
+              "OTHER_RELATIVE",
+              "FRIEND",
+              "OTHER"
+            ]
+          }
+        },
+        "required": [
+          "displayName",
+          "relationship"
+        ]
+      },
+      "PatientListItemDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "relationship": {
+            "type": "string"
+          },
+          "hospitalPatientRef": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "displayName",
+          "relationship"
+        ]
+      },
+      "CreateRequestDto": {
+        "type": "object",
+        "properties": {
+          "patientId": {
+            "type": "string"
+          },
+          "requestedBloodGroup": {
+            "type": "string",
+            "enum": [
+              "A+",
+              "A-",
+              "B+",
+              "B-",
+              "AB+",
+              "AB-",
+              "O+",
+              "O-"
+            ]
+          },
+          "component": {
+            "type": "string",
+            "enum": [
+              "WHOLE_BLOOD",
+              "RED_CELLS",
+              "PLATELETS",
+              "PLASMA",
+              "OTHER_AS_STATED"
+            ]
+          },
+          "quantityUnits": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 20
+          },
+          "requiredBy": {
+            "type": "string"
+          },
+          "urgency": {
+            "type": "string",
+            "enum": [
+              "Routine",
+              "Urgent",
+              "Critical"
+            ]
+          },
+          "contactPhone": {
+            "type": "string",
+            "example": "01712345678"
+          },
+          "altContactPhone": {
+            "type": "string"
+          },
+          "hospitalFacilityId": {
+            "type": "string"
+          },
+          "collectionFacilityId": {
+            "type": "string"
+          },
+          "areaId": {
+            "type": "string"
+          },
+          "specialInstructions": {
+            "type": "string"
+          },
+          "preferredSupportContact": {
+            "type": "string",
+            "enum": [
+              "APP_CHAT",
+              "PHONE_CALL",
+              "SMS"
+            ]
+          },
+          "clientMutationId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "patientId",
+          "requestedBloodGroup",
+          "component",
+          "quantityUnits",
+          "requiredBy",
+          "urgency",
+          "contactPhone"
+        ]
+      },
+      "FacilityNameDto": {
+        "type": "object",
+        "properties": {
+          "nameEn": {
+            "type": "string"
+          },
+          "nameBn": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "nameEn"
+        ]
+      },
+      "RequestMilestonesDto": {
+        "type": "object",
+        "properties": {
+          "submittedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "verifiedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "searchStartedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "donorWillingAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "donationReportedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "outcomeConfirmedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "fulfilledAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          }
+        }
+      },
+      "RequestViewDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "referenceNo": {
+            "type": "string",
+            "nullable": true
+          },
+          "patientId": {
+            "type": "string"
+          },
+          "patientName": {
+            "type": "string"
+          },
+          "patientRef": {
+            "type": "string",
+            "nullable": true
+          },
+          "requestedBloodGroup": {
+            "type": "string"
+          },
+          "component": {
+            "type": "string"
+          },
+          "quantityUnits": {
+            "type": "number"
+          },
+          "requiredBy": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "urgency": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "outreachPaused": {
+            "type": "boolean"
+          },
+          "cancelReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "contactPhone": {
+            "type": "string",
+            "nullable": true
+          },
+          "altContactPhone": {
+            "type": "string",
+            "nullable": true
+          },
+          "specialInstructions": {
+            "type": "string",
+            "nullable": true
+          },
+          "hospitalFacilityId": {
+            "type": "string",
+            "nullable": true
+          },
+          "collectionFacilityId": {
+            "type": "string",
+            "nullable": true
+          },
+          "hospital": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FacilityNameDto"
+              }
+            ]
+          },
+          "collectionDestination": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FacilityNameDto"
+              }
+            ]
+          },
+          "outcomeConfidence": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "Self-reported",
+              "Service-confirmed"
+            ]
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "version": {
+            "type": "number"
+          },
+          "milestones": {
+            "$ref": "#/components/schemas/RequestMilestonesDto"
+          }
+        },
+        "required": [
+          "id",
+          "patientId",
+          "patientName",
+          "requestedBloodGroup",
+          "component",
+          "quantityUnits",
+          "requiredBy",
+          "urgency",
+          "priority",
+          "status",
+          "outreachPaused",
+          "createdAt",
+          "updatedAt",
+          "version",
+          "milestones"
+        ]
+      },
+      "CancelRequestDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "enum": [
+              "NEED_MET_ELSEWHERE",
+              "NO_LONGER_REQUIRED",
+              "DUPLICATE",
+              "ENTERED_IN_ERROR",
+              "OTHER"
+            ]
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "UpdateRequestDto": {
+        "type": "object",
+        "properties": {
+          "contactPhone": {
+            "type": "string",
+            "example": "01712345678"
+          },
+          "altContactPhone": {
+            "type": "string"
+          },
+          "specialInstructions": {
+            "type": "string"
+          },
+          "quantityUnits": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 20
+          },
+          "requiredBy": {
+            "type": "string"
+          },
+          "urgency": {
+            "type": "string",
+            "enum": [
+              "Routine",
+              "Urgent",
+              "Critical"
+            ]
+          },
+          "hospitalFacilityId": {
+            "type": "string"
+          },
+          "collectionFacilityId": {
+            "type": "string"
+          },
+          "requestedBloodGroup": {
+            "type": "string",
+            "enum": [
+              "A+",
+              "A-",
+              "B+",
+              "B-",
+              "AB+",
+              "AB-",
+              "O+",
+              "O-"
+            ]
+          },
+          "component": {
+            "type": "string",
+            "enum": [
+              "WHOLE_BLOOD",
+              "RED_CELLS",
+              "PLATELETS",
+              "PLASMA",
+              "OTHER_AS_STATED"
+            ]
+          }
+        }
+      },
+      "RequestChangeDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "changeType": {
+            "type": "string"
+          },
+          "isMaterial": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "Pending",
+              "Approved",
+              "Rejected",
+              "Withdrawn",
+              "Auto-applied"
+            ]
+          },
+          "proposedValues": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "previousValues": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "changeType",
+          "isMaterial",
+          "status",
+          "proposedValues",
+          "previousValues",
+          "createdAt"
+        ]
+      },
+      "RequestChangeResultDto": {
+        "type": "object",
+        "properties": {
+          "request": {
+            "$ref": "#/components/schemas/RequestViewDto"
+          },
+          "changes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RequestChangeDto"
+            }
+          }
+        },
+        "required": [
+          "request",
+          "changes"
+        ]
+      },
+      "RequestProgressDto": {
+        "type": "object",
+        "properties": {
+          "contacted": {
+            "type": "number"
+          },
+          "responded": {
+            "type": "number"
+          },
+          "willing": {
+            "type": "number"
+          },
+          "searchWave": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "contacted",
+          "responded",
+          "willing",
+          "searchWave"
+        ]
+      },
+      "UrgentProblemDto": {
+        "type": "object",
+        "properties": {
+          "note": {
+            "type": "string"
+          }
+        }
+      },
+      "SupplyInformationDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "TimelineEntryDto": {
+        "type": "object",
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "from": {
+            "type": "string",
+            "nullable": true
+          },
+          "to": {
+            "type": "string"
+          },
+          "actorRole": {
+            "type": "string",
+            "description": "Role only; staff are never named"
+          },
+          "reasonCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "reason": {
+            "type": "string",
+            "nullable": true
+          },
+          "missingItems": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "at",
+          "to",
+          "actorRole"
+        ]
+      },
+      "ReviewQueueItemDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "referenceNo": {
+            "type": "string"
+          },
+          "patientName": {
+            "type": "string"
+          },
+          "requestedBloodGroup": {
+            "type": "string"
+          },
+          "component": {
+            "type": "string"
+          },
+          "quantityUnits": {
+            "type": "number"
+          },
+          "requiredBy": {
+            "type": "string",
+            "format": "date"
+          },
+          "urgency": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "areaId": {
+            "type": "string",
+            "nullable": true
+          },
+          "contactPhone": {
+            "type": "string",
+            "nullable": true,
+            "description": "Masked phone number"
+          },
+          "hasModerationHold": {
+            "type": "boolean"
+          },
+          "assignedSupportUserId": {
+            "type": "string",
+            "nullable": true
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "firstActionAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "version": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "referenceNo",
+          "patientName",
+          "requestedBloodGroup",
+          "component",
+          "quantityUnits",
+          "requiredBy",
+          "urgency",
+          "priority",
+          "status",
+          "areaId",
+          "contactPhone",
+          "hasModerationHold",
+          "assignedSupportUserId",
+          "submittedAt",
+          "firstActionAt",
+          "version"
+        ]
+      },
+      "ReviewFlagDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "flagType": {
+            "type": "string"
+          },
+          "matchedRequestId": {
+            "type": "string",
+            "nullable": true
+          },
+          "matchedReferenceNo": {
+            "type": "string",
+            "nullable": true
+          },
+          "detail": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "status": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "resolvedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "resolutionNote": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "flagType",
+          "matchedRequestId",
+          "matchedReferenceNo",
+          "detail",
+          "status",
+          "createdAt",
+          "resolvedAt",
+          "resolutionNote"
+        ]
+      },
+      "ReviewRequestDetailDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "referenceNo": {
+            "type": "string"
+          },
+          "patientName": {
+            "type": "string"
+          },
+          "requestedBloodGroup": {
+            "type": "string"
+          },
+          "component": {
+            "type": "string"
+          },
+          "quantityUnits": {
+            "type": "number"
+          },
+          "requiredBy": {
+            "type": "string",
+            "format": "date"
+          },
+          "urgency": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "areaId": {
+            "type": "string",
+            "nullable": true
+          },
+          "contactPhone": {
+            "type": "string",
+            "nullable": true,
+            "description": "Masked phone number"
+          },
+          "hasModerationHold": {
+            "type": "boolean"
+          },
+          "assignedSupportUserId": {
+            "type": "string",
+            "nullable": true
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "firstActionAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "version": {
+            "type": "number"
+          },
+          "flags": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReviewFlagDto"
+            }
+          },
+          "changes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RequestChangeDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "referenceNo",
+          "patientName",
+          "requestedBloodGroup",
+          "component",
+          "quantityUnits",
+          "requiredBy",
+          "urgency",
+          "priority",
+          "status",
+          "areaId",
+          "contactPhone",
+          "hasModerationHold",
+          "assignedSupportUserId",
+          "submittedAt",
+          "firstActionAt",
+          "version",
+          "flags",
+          "changes"
+        ]
+      },
+      "ResolveFlagDto": {
+        "type": "object",
+        "properties": {
+          "resolution": {
+            "type": "string",
+            "enum": [
+              "Dismissed",
+              "Confirmed"
+            ]
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "resolution",
+          "note"
+        ]
+      },
+      "DecideChangeDto": {
+        "type": "object",
+        "properties": {
+          "note": {
+            "type": "string"
+          }
+        }
+      },
+      "RejectChangeDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "PauseOutreachDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "RequestInformationDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "DOCUMENT_MISSING",
+                "DOCUMENT_ILLEGIBLE",
+                "BLOOD_GROUP_MISMATCH",
+                "COMPONENT_MISMATCH",
+                "FACILITY_UNCLEAR",
+                "CONTACT_UNREACHABLE",
+                "OTHER"
+              ]
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "VerifyRequestDto": {
+        "type": "object",
+        "properties": {
+          "documentLegible": {
+            "type": "boolean"
+          },
+          "bloodGroupAndComponentMatch": {
+            "type": "boolean"
+          },
+          "facilityExists": {
+            "type": "boolean"
+          },
+          "representativeReachable": {
+            "type": "boolean"
+          },
+          "noDuplicate": {
+            "type": "boolean"
+          },
+          "urgencyConsistent": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "documentLegible",
+          "bloodGroupAndComponentMatch",
+          "facilityExists",
+          "representativeReachable",
+          "noDuplicate",
+          "urgencyConsistent"
+        ]
+      },
+      "RejectRequestDto": {
+        "type": "object",
+        "properties": {
+          "reasonCode": {
+            "type": "string",
+            "enum": [
+              "DUPLICATE",
+              "SUSPECTED_MISUSE",
+              "NO_GENUINE_NEED",
+              "DOCUMENT_INVALID",
+              "UNREACHABLE",
+              "OTHER"
+            ]
+          },
+          "explanation": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reasonCode",
+          "explanation"
+        ]
+      },
+      "ApproveWaveDto": {
+        "type": "object",
+        "properties": {
+          "removeCandidateIds": {
+            "description": "Candidates to drop from the proposed batch",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "note": {
+            "type": "string",
+            "description": "Required once the wave number passes the maximum"
+          }
+        }
+      },
+      "InvitationViewDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "response": {
+            "type": "string",
+            "nullable": true
+          },
+          "expiresAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "sentAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "respondedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "details": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": true
+          },
+          "notice": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "expiresAt",
+          "notice"
+        ]
+      },
+      "RespondDto": {
+        "type": "object",
+        "properties": {
+          "response": {
+            "type": "string",
+            "enum": [
+              "Available",
+              "Later",
+              "Unavailable"
+            ]
+          },
+          "laterAvailableAt": {
+            "type": "string",
+            "description": "When the donor will be able to answer; needed for Later"
+          },
+          "clientMutationId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "response"
+        ]
+      },
+      "WithdrawInvitationDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "enum": [
+              "SCHEDULE_CONFLICT",
+              "TRAVEL_PROBLEM",
+              "ADVISED_NOT_TO_DONATE",
+              "PERSONAL",
+              "OTHER"
+            ]
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "CaseListItemDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "caseNo": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "string"
+          },
+          "requestId": {
+            "type": "string"
+          },
+          "requestReference": {
+            "type": "string",
+            "nullable": true
+          },
+          "openedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "overdue": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "caseNo",
+          "status",
+          "priority",
+          "requestId",
+          "requestReference",
+          "openedAt",
+          "overdue"
+        ]
+      },
+      "NoteDto": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "noteType": {
+            "type": "string",
+            "enum": [
+              "GENERAL",
+              "HANDOVER",
+              "ESCALATION",
+              "EXTERNAL_CONTACT"
+            ]
+          }
+        },
+        "required": [
+          "body"
+        ]
+      },
+      "ContactAttemptDto": {
+        "type": "object",
+        "properties": {
+          "party": {
+            "type": "string",
+            "enum": [
+              "DONOR",
+              "REPRESENTATIVE",
+              "HOSPITAL",
+              "COLLECTION_SERVICE",
+              "OTHER_EXTERNAL"
+            ]
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "PHONE_CALL",
+              "SMS",
+              "IN_APP_MESSAGE"
+            ]
+          },
+          "result": {
+            "type": "string",
+            "enum": [
+              "REACHED",
+              "NO_ANSWER",
+              "BUSY",
+              "WRONG_NUMBER",
+              "CALLBACK_REQUESTED",
+              "LEFT_MESSAGE"
+            ]
+          },
+          "caseDonorId": {
+            "type": "string"
+          },
+          "facilityId": {
+            "type": "string"
+          },
+          "externalPerson": {
+            "type": "string",
+            "description": "Name and role of the external person, kept as a case note"
+          }
+        },
+        "required": [
+          "party",
+          "channel",
+          "result"
+        ]
+      },
+      "ProposeAppointmentDto": {
+        "type": "object",
+        "properties": {
+          "caseDonorId": {
+            "type": "string"
+          },
+          "facilityId": {
+            "type": "string"
+          },
+          "scheduledStart": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "caseDonorId",
+          "facilityId",
+          "scheduledStart"
+        ]
+      },
+      "RescheduleDto": {
+        "type": "object",
+        "properties": {
+          "scheduledStart": {
+            "type": "string"
+          },
+          "facilityId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "scheduledStart"
+        ]
+      },
+      "RecordOutcomeDto": {
+        "type": "object",
+        "properties": {
+          "sourceType": {
+            "type": "string",
+            "enum": [
+              "COLLECTION_SERVICE_CONFIRMATION",
+              "HOSPITAL_CONFIRMATION",
+              "SUPPORT_OBSERVATION"
+            ]
+          },
+          "outcomeType": {
+            "type": "string",
+            "enum": [
+              "DONATION_COMPLETED",
+              "DONATION_NOT_COMPLETED",
+              "UNITS_RECEIVED_BY_PATIENT_SERVICE",
+              "NEED_CHANGED",
+              "NEED_NO_LONGER_REQUIRED"
+            ]
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "PHONE",
+              "IN_APP"
+            ]
+          },
+          "units": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 20
+          },
+          "reportedByName": {
+            "type": "string"
+          },
+          "reportedByRole": {
+            "type": "string"
+          },
+          "reportedAt": {
+            "type": "string"
+          },
+          "caseDonorId": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Free text without clinical detail"
+          }
+        },
+        "required": [
+          "sourceType",
+          "outcomeType",
+          "channel"
+        ]
+      },
+      "DisputeOutcomeDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "ResolveDisputeDto": {
+        "type": "object",
+        "properties": {
+          "resolution": {
+            "type": "string",
+            "enum": [
+              "UPHELD",
+              "CORRECTED"
+            ]
+          },
+          "note": {
+            "type": "string"
+          },
+          "correction": {
+            "description": "Required when the resolution is CORRECTED",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RecordOutcomeDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "resolution",
+          "note"
+        ]
+      },
+      "MoreDonorsDto": {
+        "type": "object",
+        "properties": {
+          "needed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "needed"
+        ]
+      },
+      "DeclareUnableDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "CloseCaseDto": {
+        "type": "object",
+        "properties": {
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "note"
+        ]
+      },
+      "DonorFacilityDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "phone": {
+            "type": "string",
+            "nullable": true
+          },
+          "directionsUrl": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
+      "DonorAppointmentDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "scheduledStart": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "facility": {
+            "$ref": "#/components/schemas/DonorFacilityDto"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "scheduledStart",
+          "facility"
+        ]
+      },
+      "TimingProblemDto": {
+        "type": "object",
+        "properties": {
+          "note": {
+            "type": "string"
+          }
+        }
+      },
+      "NotificationItemDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "eventCode": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "INVITATIONS",
+              "REMINDERS",
+              "REQUEST_UPDATES",
+              "SUPPORT",
+              "CAMPAIGNS",
+              "COMMUNITY",
+              "SYSTEM"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "nullable": true
+          },
+          "body": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "read": {
+            "type": "boolean"
+          },
+          "requestId": {
+            "type": "string",
+            "nullable": true
+          },
+          "invitationId": {
+            "type": "string",
+            "nullable": true
+          },
+          "critical": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "eventCode",
+          "category",
+          "createdAt",
+          "read",
+          "critical"
+        ]
+      },
+      "UnreadCountDto": {
+        "type": "object",
+        "properties": {
+          "unread": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "unread"
+        ]
+      },
+      "PushTokenDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "FacilityDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "HOSPITAL",
+              "COLLECTION_SERVICE",
+              "CAMPAIGN_SITE"
+            ]
+          },
+          "nameEn": {
+            "type": "string"
+          },
+          "nameBn": {
+            "type": "string",
+            "nullable": true
+          },
+          "areaId": {
+            "type": "string"
+          },
+          "isVerified": {
+            "type": "boolean"
+          },
+          "supportsBooking": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "nameEn",
+          "areaId",
+          "isVerified",
+          "supportsBooking"
+        ]
+      },
+      "FacilityPageDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FacilityDto"
+            }
+          },
+          "total": {
+            "type": "number"
+          },
+          "limit": {
+            "type": "number"
+          },
+          "offset": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ]
+      },
+      "AreaDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "parentId": {
+            "type": "object",
+            "nullable": true
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "DIVISION",
+              "DISTRICT",
+              "UPAZILA",
+              "UNION"
+            ]
+          },
+          "code": {
+            "type": "string"
+          },
+          "nameEn": {
+            "type": "string"
+          },
+          "nameBn": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "level",
+          "code",
+          "nameEn",
+          "nameBn"
+        ]
+      },
+      "AreaPageDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AreaDto"
+            }
+          },
+          "total": {
+            "type": "number"
+          },
+          "limit": {
+            "type": "number"
+          },
+          "offset": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ]
+      }
+    }
+  }
+}

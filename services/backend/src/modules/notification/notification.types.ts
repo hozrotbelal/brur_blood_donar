@@ -1,3 +1,5 @@
+import type { NotificationCategory } from '../identity/read-model.public';
+
 export type Channel = 'IN_APP' | 'PUSH' | 'SMS';
 export type Lang = 'bn' | 'en';
 export type NotificationRole = 'DON' | 'PAT' | 'SUP' | 'MOD' | 'ADM';
@@ -42,11 +44,12 @@ export interface NotificationRow {
   scheduled_for: Date;
 }
 
-export const CATEGORY_BY_EVENT: Record<string, string> = {
+export const CATEGORY_BY_EVENT: Record<string, NotificationCategory> = {
   'NTF-EV-04': 'INVITATIONS',
   'NTF-EV-11': 'REMINDERS',
   'NTF-EV-14': 'REMINDERS',
   'NTF-EV-18': 'SYSTEM',
+  'NTF-EV-21': 'SYSTEM',
 };
 
-export const categoryOf = (eventCode: string) => CATEGORY_BY_EVENT[eventCode] ?? 'REQUEST_UPDATES';
+export const categoryOf = (eventCode: string): NotificationCategory => CATEGORY_BY_EVENT[eventCode] ?? 'REQUEST_UPDATES';

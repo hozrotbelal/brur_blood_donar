@@ -2,6 +2,7 @@ import { HttpException, HttpStatus, Inject, Injectable, NotFoundException } from
 import { randomUUID } from 'node:crypto';
 import { DatabaseService, Db } from '../../platform/db/database.service';
 import { OutboxService } from '../../platform/outbox/outbox.service';
+import { staffAreaIds } from '../../platform/policy/area-scope';
 import { PolicyService } from '../../platform/policy/policy.service';
 import { Principal } from '../../platform/policy/policy.types';
 import { StatusHistoryService } from '../../platform/status/status-history.service';
@@ -213,6 +214,61 @@ export class MatchingService {
       }
     }
     return proposed;
+  }
+
+  async recheckAfterChange(requestId: string): Promise<{ cancelled: number; waveId: string | null }> {
+    return this.db.transaction(async (tx) => {
+      const req = await this.lockRequest(tx, requestId);
+      if (!['Verified', 'Searching', 'Donor coordination'].includes(req.status)) return { cancelled: 0, waveId: null };
+      const correlationId = randomUUID();
+
+      const open = await tx.query<{ id: string; status: string }>(
+        `SELECT id, status FROM src.invitation WHERE request_id = $1 AND status IN ('Queued','Sent','Delivered','Viewed') FOR UPDATE`,
+        [req.id],
+      );
+      for (const inv of open.rows) {
+        await tx.query(
+          `UPDATE src.invitation SET status = 'Cancelled', cancel_reason = 'REQUEST_CHANGED', cancelled_at = now(), version = version + 1, updated_at = now()
+            WHERE id = $1`,
+          [inv.id],
+        );
+        await this.history.record(tx, {
+          entityType: 'INVITATION', entityId: inv.id, from: inv.status, to: 'Cancelled', actorUserId: null, actorRole: 'SYSTEM',
+          source: 'SYSTEM', contextRequestId: req.id, reasonCode: 'REQUEST_CHANGED', correlationId,
+        });
+      }
+
+      const stale = await tx.query<{ id: string; status: string }>(
+        `SELECT id, status FROM src.match_run WHERE request_id = $1 AND status IN ('Pending','Pending approval') FOR UPDATE`,
+        [req.id],
+      );
+      for (const run of stale.rows) {
+        await tx.query(`UPDATE src.match_run SET status = 'Superseded', version = version + 1, updated_at = now() WHERE id = $1`, [run.id]);
+        await this.history.record(tx, {
+          entityType: 'MATCH_RUN', entityId: run.id, from: run.status, to: 'Superseded', actorUserId: null, actorRole: 'SYSTEM',
+          source: 'SYSTEM', contextRequestId: req.id, reasonCode: 'REQUEST_CHANGED', correlationId,
+        });
+        await tx.query(
+          `UPDATE crd.case_task SET status = 'Cancelled', version = version + 1, updated_at = now()
+            WHERE dedupe_key = $1 AND status IN ('Open','In progress')`,
+          [`batch:${run.id}`],
+        );
+      }
+
+      if (open.rows.length > 0) {
+        await this.outbox.append(tx, {
+          aggregateType: 'BLOOD_REQUEST', aggregateId: req.id, eventType: 'InvitationsCancelled',
+          payload: { invitationIds: open.rows.map((r) => r.id), reason: 'REQUEST_CHANGED' },
+          version: req.version,
+        });
+      }
+
+      let waveId: string | null = null;
+      if (req.status === 'Searching' && !req.outreach_paused && !req.has_moderation_hold && req.has_location) {
+        waveId = await this.createWave(tx, req, 'MANUAL', null);
+      }
+      return { cancelled: open.rows.length, waveId };
+    });
   }
 
   async listWaves(principal: Principal, requestId: string) {
@@ -479,14 +535,9 @@ export class MatchingService {
   }
 
   private async requireStaffAccess(db: Db, principal: Principal, req: RequestRow, key = 'invitation.create') {
-    const { rows } = await db.query<{ area_id: string }>(
-      `SELECT s.area_id FROM idn.permission_scope s JOIN idn.user_role ur ON ur.id = s.user_role_id
-        WHERE ur.user_id = $1 AND ur.status = 'Active' AND s.revoked_at IS NULL AND s.area_id IS NOT NULL`,
-      [principal.userId],
-    );
     const decision = this.policy.decide(principal, key, {
       resource: { assignedUserIds: req.assigned_support_user_id ? [req.assigned_support_user_id] : [], areaIds: req.area_id ? [req.area_id] : [] },
-      principalAreaIds: rows.map((r) => r.area_id),
+      principalAreaIds: await staffAreaIds(db, principal.userId),
     });
     if (!decision.allowed) throw new NotFoundException({ code: 'REQUEST_NOT_FOUND' });
   }
