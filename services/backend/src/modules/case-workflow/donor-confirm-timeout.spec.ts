@@ -1,26 +1,24 @@
+import { Captured, fakeDb } from '../../../test/fake-db';
 import { DatabaseService, Db } from '../../platform/db/database.service';
 import { CaseRow, CaseSupport } from './case.support';
 import { CaseService } from './case.service';
 import { StatusHistoryService } from '../../platform/status/status-history.service';
 
-const candidate = { id: 'cd1', case_id: 'c1', donor_profile_id: 'dp1' };
-const caseRow = { id: 'c1', request_id: 'r1', owner_user_id: 'u1' } as unknown as CaseRow;
+const candidate = ['cd1', 'c1', 'dp1'];
+const caseRow = { id: 'c1', requestId: 'r1', ownerUserId: 'u1' } as unknown as CaseRow;
+const isCandidateQuery = (s: Captured) => s.text.startsWith('select "crd"."case_donor"."id"');
 
-function setup(candidates: unknown[], confirmedInTx: unknown[] = []) {
-  const dbQuery = jest.fn().mockResolvedValue({ rows: candidates, rowCount: candidates.length });
-  const txQuery = jest.fn().mockResolvedValue({ rows: confirmedInTx, rowCount: confirmedInTx.length });
-  const tx = { query: txQuery } as unknown as Db;
-  const db = {
-    query: dbQuery,
-    transaction: jest.fn(async (work: (t: Db) => Promise<unknown>) => work(tx)),
-  } as unknown as DatabaseService;
+function setup(candidates: unknown[][], confirmedInTx: unknown[][] = []) {
+  const outer = fakeDb((s) => (isCandidateQuery(s) ? { rows: candidates } : undefined));
+  const tx = fakeDb((s) => (s.text.startsWith('select "id" from "crd"."appointment"') ? { rows: confirmedInTx } : undefined));
+  const db = { ...outer, transaction: jest.fn(async (work: (t: Db) => Promise<unknown>) => work(tx)) } as unknown as DatabaseService;
   const support = {
     loadCase: jest.fn().mockResolvedValue(caseRow),
     openTask: jest.fn().mockResolvedValue(undefined),
     event: jest.fn().mockResolvedValue(undefined),
   };
   const service = new CaseService(db, support as unknown as CaseSupport, {} as StatusHistoryService);
-  return { service, support, db };
+  return { service, support, outer };
 }
 
 describe('CaseService.flagUnconfirmedDonors', () => {
@@ -39,16 +37,17 @@ describe('CaseService.flagUnconfirmedDonors', () => {
   });
 
   it('uses the Critical and default timeouts in the candidate query', async () => {
-    const { service, db } = setup([]);
+    const { service, outer } = setup([]);
     await service.flagUnconfirmedDonors();
-    const [sql, params] = (db.query as jest.Mock).mock.calls[0];
-    expect(sql).toContain('make_interval(mins => CASE WHEN c.priority = \'Critical\' THEN $2::int ELSE $3::int END)');
-    expect(sql).toContain('NOT EXISTS (SELECT 1 FROM crd.appointment a WHERE a.case_donor_id = cd.id AND a.confirmed_by_donor_at IS NOT NULL)');
-    expect(params).toEqual([expect.any(Array), 15, 60]);
+    const query = outer.statements.find(isCandidateQuery)!;
+    expect(query.text).toMatch(/make_interval\(mins => CASE WHEN "crd"\."coordination_case"\."priority" = 'Critical' THEN \$(\d+)::int ELSE \$(\d+)::int END\)/);
+    const [, critical, other] = query.text.match(/THEN \$(\d+)::int ELSE \$(\d+)::int/)!;
+    expect([query.values[Number(critical) - 1], query.values[Number(other) - 1]]).toEqual([15, 60]);
+    expect(query.text).toContain('not exists (select "id" from "crd"."appointment" where ("crd"."appointment"."case_donor_id" = "crd"."case_donor"."id" and "crd"."appointment"."confirmed_by_donor_at" is not null))');
   });
 
   it('does nothing when the donor confirmed between selection and the transaction', async () => {
-    const { service, support } = setup([candidate], [{ '?column?': 1 }]);
+    const { service, support } = setup([candidate], [['a1']]);
     await service.flagUnconfirmedDonors();
     expect(support.openTask).not.toHaveBeenCalled();
     expect(support.event).not.toHaveBeenCalled();

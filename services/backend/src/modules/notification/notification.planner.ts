@@ -17,6 +17,7 @@ interface RequestInfo {
 
 const REMINDER_OFFSETS_HOURS = [24, 2];
 
+// Raw SQL: each query here reads other modules' tables to address recipients (ADR-16 rule 6).
 @Injectable()
 export class NotificationPlanner implements OnModuleInit {
   constructor(

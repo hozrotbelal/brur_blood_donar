@@ -9,7 +9,8 @@ The matrix tables put fewer cells in a row than they have columns. I used these 
 - Where section 3.2, 3.4 or 3.5 names the default holders of a key (for example "SUP Agent (Assigned active request); SUP Lead (Area); ADM (All, reason)"), that text decides.
 - In table 3.3b (MOD, MOD Lead, ADM), a row with two cells was read as (Moderator and Moderation Lead share cell one) and (ADM is cell two). A row with three cells was read one per column.
 - In table 3.3a, a "—" cell shared by DON and PAT means neither role holds the key.
-- Administrator and Primary Administrator hold the same keys. The difference (only a Primary Administrator grants ADM sets) is in the grant rules, not in this catalogue.
+- Administrator and Primary Administrator hold the same keys. The difference is in the grant rules, not in this catalogue: only a Primary Administrator grants an ADM tier, or changes, resets or deactivates someone who holds one (FR-CFG-026); the last Primary Administrator cannot be demoted or deactivated. Enforced in `StaffService` since 4 Nov 2026.
+- Staff management reuses existing keys: viewing staff, permission sets and the access review needs `staff.invite` or `permission.manage`; changing a tier or areas, resetting a device, deactivating and access review decisions need `permission.manage` (step-up). No keys were added.
 - Tiers do not inherit. Each set lists its keys explicitly.
 
 ## Everyday keys I had to name

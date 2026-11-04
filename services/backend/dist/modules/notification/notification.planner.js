@@ -19,6 +19,7 @@ const event_bus_1 = require("../../platform/outbox/event-bus");
 const notification_service_1 = require("./notification.service");
 const template_renderer_1 = require("./template.renderer");
 const REMINDER_OFFSETS_HOURS = [24, 2];
+// Raw SQL: each query here reads other modules' tables to address recipients (ADR-16 rule 6).
 let NotificationPlanner = class NotificationPlanner {
     db;
     bus;

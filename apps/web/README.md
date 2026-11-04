@@ -43,14 +43,14 @@ The portal calls `/api/v1/...` on its own origin. `next.config.mjs` proxies thos
 
 - Sign-in, session restore, shell and role menus.
 - Support work queue and request verification (backlog item 5, part).
-- Organization Admin: staff invitations list, invite and revoke (backlog item 6, part).
+- Support coordination cases (`/cases`, `/cases/<id>`) and case outcomes (`/outcomes`): appointments, contact attempts, notes, outcomes with disputes, fulfilment, more donors, close and unable to fulfil (backlog item 5, part). Components: `case-list.tsx`, `case-detail.tsx`, `case-appointments.tsx`, `case-outcomes.tsx`.
+- Organization Admin team (backlog item 6): staff (`/team/staff`), invitations, roles and permission sets (`/team/roles`) and the monthly access review (`/team/access`). Sensitive actions use `components/step-up.tsx`: on `403 STEP_UP_REQUIRED` it asks for an SMS code, confirms it and retries once.
 
 ## Not yet built
 
-- Support: coordination case screens, outcomes, escalations, account recovery review, waves and batch approval, donor map, conversations (backlog item 5).
-- Organization Admin: staff list, assignment changes, roles, configuration, templates, reports (backlog items 6 and 7).
+- Support: escalations, account recovery review, search runs, waves and batch approval, pause and resume, donor map, conversations (backlog item 5).
+- Organization Admin: configuration, templates, reports (backlog item 7); staff recovery approvals and login history (item 15).
 - Moderation and community screens (backlog item 8).
-- Step-up in the browser: sensitive actions answer `403 STEP_UP_REQUIRED`; the portal must call `POST /api/v1/auth/step-up/challenge` and then `POST /api/v1/auth/step-up` before retrying.
 
 The typed API client lives in `packages/api-client` and is regenerated from `packages/api-contract/openapi.json` (see that package's README).
 

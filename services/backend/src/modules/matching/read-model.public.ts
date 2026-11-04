@@ -1,6 +1,6 @@
-import { eq, sql } from 'drizzle-orm';
+import { and, count, eq, gte, inArray, lt, sql } from 'drizzle-orm';
 import { Db } from '../../platform/db/database.service';
-import { invitation } from './schema';
+import { invitation, searchEvent } from './schema';
 
 export interface SearchCounts {
   contacted: number;
@@ -18,4 +18,14 @@ export async function searchCountsForRequest(db: Db, requestId: string): Promise
     .from(invitation)
     .where(eq(invitation.requestId, requestId));
   return { contacted: row?.contacted ?? 0, responded: row?.responded ?? 0, willing: row?.willing ?? 0 };
+}
+
+export async function searchCountsByActor(db: Db, userIds: string[], from: Date, to: Date): Promise<Map<string, number>> {
+  if (userIds.length === 0) return new Map();
+  const rows = await db.orm
+    .select({ userId: searchEvent.actorUserId, n: count() })
+    .from(searchEvent)
+    .where(and(inArray(searchEvent.actorUserId, userIds), gte(searchEvent.occurredAt, from), lt(searchEvent.occurredAt, to)))
+    .groupBy(searchEvent.actorUserId);
+  return new Map(rows.map((r) => [r.userId, r.n]));
 }

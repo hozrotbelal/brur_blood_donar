@@ -19,6 +19,8 @@ const node_crypto_1 = require("node:crypto");
 const audit_service_1 = require("../../platform/audit/audit.service");
 const database_service_1 = require("../../platform/db/database.service");
 const outbox_service_1 = require("../../platform/outbox/outbox.service");
+const status_history_service_1 = require("../../platform/status/status-history.service");
+const read_model_public_1 = require("../case-workflow/read-model.public");
 const phone_1 = require("./phone");
 const password_policy_1 = require("./password-policy");
 const password_service_1 = require("./password.service");
@@ -27,6 +29,7 @@ const sms_port_1 = require("./sms.port");
 const INVITE_DAYS = 7;
 const HASH_PARAMS = { memoryKiB: 19456, timeCost: 2, parallelism: 1 };
 const sha = (v) => (0, node_crypto_1.createHash)('sha256').update(v).digest('hex');
+const PRIMARY_TIER = 'TIER_PRIMARY_ADMINISTRATOR';
 const fail = (code, status = common_1.HttpStatus.UNPROCESSABLE_ENTITY) => new common_1.HttpException({ code }, status);
 let StaffService = class StaffService {
     db;
@@ -34,12 +37,14 @@ let StaffService = class StaffService {
     sms;
     outbox;
     audit;
-    constructor(db, passwords, sms, outbox, audit) {
+    history;
+    constructor(db, passwords, sms, outbox, audit, history) {
         this.db = db;
         this.passwords = passwords;
         this.sms = sms;
         this.outbox = outbox;
         this.audit = audit;
+        this.history = history;
     }
     async invite(principal, dto) {
         const phone = (0, phone_1.normalizeBdPhone)(dto.phone);
@@ -162,6 +167,7 @@ let StaffService = class StaffService {
                 throw new common_1.NotFoundException({ code: 'STAFF_NOT_FOUND' });
             const tier = await this.tier(tx, dto.tierCode, t.roleCode);
             await this.requireAuthority(tx, principal.userId, tier);
+            await this.guardTarget(tx, principal.userId, userId, tier);
             const areaIds = await this.checkAreas(tx, t.roleCode, dto.areaIds ?? []);
             const tierSets = tx.orm.select({ id: schema_1.permissionSet.id }).from(schema_1.permissionSet).where((0, drizzle_orm_1.eq)(schema_1.permissionSet.kind, 'TIER'));
             await tx.orm
@@ -181,6 +187,143 @@ let StaffService = class StaffService {
             });
             return { userId, tierCode: tier.code, areaIds };
         });
+    }
+    async staffList() {
+        const users = await this.db.orm
+            .select({ userId: schema_1.appUser.id, displayName: schema_1.appUser.displayName, phoneLast4: (0, drizzle_orm_1.sql) `right(${schema_1.appUser.phoneE164}, 4)`, accountStatus: schema_1.appUser.accountStatus, lastLoginAt: schema_1.appUser.lastLoginAt })
+            .from(schema_1.appUser)
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.appUser.isStaff, true), (0, drizzle_orm_1.isNull)(schema_1.appUser.deletedAt)))
+            .orderBy((0, drizzle_orm_1.desc)(schema_1.appUser.createdAt))
+            .limit(500);
+        const ids = users.map((u) => u.userId);
+        if (ids.length === 0)
+            return [];
+        const roles = await this.db.orm
+            .select({ userId: schema_1.userRole.userId, userRoleId: schema_1.userRole.id, roleCode: schema_1.role.code, status: schema_1.userRole.status })
+            .from(schema_1.userRole)
+            .innerJoin(schema_1.role, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.role.id, schema_1.userRole.roleId), (0, drizzle_orm_1.eq)(schema_1.role.isStaff, true)))
+            .where((0, drizzle_orm_1.inArray)(schema_1.userRole.userId, ids))
+            .orderBy((0, drizzle_orm_1.desc)(schema_1.userRole.assignedAt));
+        const tiers = await this.db.orm
+            .select({ userId: schema_1.userPermissionSet.userId, code: schema_1.permissionSet.code })
+            .from(schema_1.userPermissionSet)
+            .innerJoin(schema_1.permissionSet, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.permissionSet.id, schema_1.userPermissionSet.permissionSetId), (0, drizzle_orm_1.eq)(schema_1.permissionSet.kind, 'TIER')))
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.inArray)(schema_1.userPermissionSet.userId, ids), (0, drizzle_orm_1.eq)(schema_1.userPermissionSet.status, 'Active')));
+        const activeRoleIds = roles.filter((r) => r.status === 'Active').map((r) => r.userRoleId);
+        const scopes = activeRoleIds.length
+            ? await this.db.orm
+                .select({ userRoleId: schema_1.permissionScope.userRoleId, areaId: schema_1.permissionScope.areaId })
+                .from(schema_1.permissionScope)
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.inArray)(schema_1.permissionScope.userRoleId, activeRoleIds), (0, drizzle_orm_1.isNull)(schema_1.permissionScope.revokedAt)))
+            : [];
+        return users.map((u) => {
+            const current = roles.find((r) => r.userId === u.userId && r.status === 'Active') ?? roles.find((r) => r.userId === u.userId);
+            const active = current?.status === 'Active';
+            return {
+                userId: u.userId, displayName: u.displayName, phoneLast4: u.phoneLast4, roleCode: current?.roleCode ?? null,
+                tierCode: active ? (tiers.find((t) => t.userId === u.userId)?.code ?? null) : null,
+                areaIds: active ? scopes.filter((s) => s.userRoleId === current.userRoleId && s.areaId).map((s) => s.areaId) : [],
+                status: !active ? 'Deactivated' : u.accountStatus === 'Active' ? 'Active' : u.accountStatus === 'Locked' ? 'Locked' : 'Suspended',
+                lastLoginAt: u.lastLoginAt,
+            };
+        });
+    }
+    async deactivate(principal, userId, reason) {
+        return this.db.transaction(async (tx) => {
+            if (userId === principal.userId)
+                throw fail('CANNOT_CHANGE_OWN_ASSIGNMENT');
+            const t = await this.lockStaffRole(tx, userId);
+            await this.guardTarget(tx, principal.userId, userId, null);
+            const now = new Date();
+            const tierSets = tx.orm.select({ id: schema_1.permissionSet.id }).from(schema_1.permissionSet).where((0, drizzle_orm_1.eq)(schema_1.permissionSet.kind, 'TIER'));
+            await tx.orm
+                .update(schema_1.userPermissionSet)
+                .set({ status: 'Revoked', revokedBy: principal.userId, revokedAt: now, revokeReason: reason, version: (0, drizzle_orm_1.sql) `${schema_1.userPermissionSet.version} + 1`, updatedAt: now })
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.userPermissionSet.userId, userId), (0, drizzle_orm_1.eq)(schema_1.userPermissionSet.status, 'Active'), (0, drizzle_orm_1.inArray)(schema_1.userPermissionSet.permissionSetId, tierSets)));
+            await tx.orm.update(schema_1.permissionScope).set({ revokedAt: now, updatedAt: now }).where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.permissionScope.userRoleId, t.userRoleId), (0, drizzle_orm_1.isNull)(schema_1.permissionScope.revokedAt)));
+            await tx.orm
+                .update(schema_1.userRole)
+                .set({ status: 'Revoked', revokedBy: principal.userId, revokedAt: now, reason, version: (0, drizzle_orm_1.sql) `${schema_1.userRole.version} + 1`, updatedAt: now })
+                .where((0, drizzle_orm_1.eq)(schema_1.userRole.id, t.userRoleId));
+            await this.history.record(tx, {
+                entityType: 'USER_ROLE', entityId: t.userRoleId, from: 'Active', to: 'Revoked', actorUserId: principal.userId, actorRole: 'ADM', source: 'USER',
+                reasonCode: 'STAFF_DEACTIVATED', reason, correlationId: (0, node_crypto_1.randomUUID)(),
+            });
+            await this.revokeAccess(tx, userId, 'ADMIN');
+            await this.outbox.append(tx, { aggregateType: 'APP_USER', aggregateId: userId, eventType: 'StaffDeactivated', payload: { roleCode: t.roleCode, by: principal.userId } });
+            await this.audit.record(tx, {
+                category: 'PERMISSION', action: 'PERMISSION_REVOKED', result: 'SUCCESS', actorUserId: principal.userId, actorRole: 'ADM', entityType: 'app_user', entityId: userId,
+                reasonCode: 'STAFF_DEACTIVATED', reasonText: reason, correlationId: (0, node_crypto_1.randomUUID)(),
+            });
+            return { userId, status: 'Deactivated', openCases: await (0, read_model_public_1.openCasesOwnedBy)(tx, userId) };
+        });
+    }
+    async resetDevices(principal, userId, reason) {
+        return this.db.transaction(async (tx) => {
+            if (userId === principal.userId)
+                throw fail('CANNOT_CHANGE_OWN_ASSIGNMENT');
+            await this.lockStaffRole(tx, userId);
+            await this.guardTarget(tx, principal.userId, userId, await this.currentTier(tx, userId));
+            const devicesRevoked = await this.revokeAccess(tx, userId, 'DEVICE_REVOKED');
+            await this.audit.record(tx, {
+                category: 'AUTH', action: 'SESSIONS_REVOKED', result: 'SUCCESS', actorUserId: principal.userId, actorRole: 'ADM', entityType: 'app_user', entityId: userId,
+                reasonCode: 'DEVICE_RESET', reasonText: reason, correlationId: (0, node_crypto_1.randomUUID)(),
+            });
+            return { userId, devicesRevoked };
+        });
+    }
+    async assertCanManage(tx, grantorId, targetUserId) {
+        if (targetUserId === grantorId)
+            throw fail('CANNOT_CHANGE_OWN_ASSIGNMENT');
+        await this.lockStaffRole(tx, targetUserId);
+        await this.guardTarget(tx, grantorId, targetUserId, await this.currentTier(tx, targetUserId));
+    }
+    async lockStaffRole(tx, userId) {
+        const [t] = await tx.orm
+            .select({ userRoleId: schema_1.userRole.id, roleCode: schema_1.role.code })
+            .from(schema_1.appUser)
+            .innerJoin(schema_1.userRole, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.userRole.userId, schema_1.appUser.id), (0, drizzle_orm_1.eq)(schema_1.userRole.status, 'Active')))
+            .innerJoin(schema_1.role, (0, drizzle_orm_1.eq)(schema_1.role.id, schema_1.userRole.roleId))
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.appUser.id, userId), (0, drizzle_orm_1.eq)(schema_1.appUser.isStaff, true), (0, drizzle_orm_1.isNull)(schema_1.appUser.deletedAt), (0, drizzle_orm_1.inArray)(schema_1.role.code, ['SUP', 'MOD', 'ADM'])))
+            .for('update');
+        if (!t)
+            throw new common_1.NotFoundException({ code: 'STAFF_NOT_FOUND' });
+        return t;
+    }
+    async revokeAccess(tx, userId, reason) {
+        const now = new Date();
+        const devices = await tx.orm
+            .update(schema_1.device)
+            .set({ signOutStatus: 'Revoked', revokedAt: now, staffMfaVerifiedAt: null, isTrusted: false, updatedAt: now })
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.device.userId, userId), (0, drizzle_orm_1.ne)(schema_1.device.signOutStatus, 'Revoked')))
+            .returning({ id: schema_1.device.id });
+        await tx.orm.update(schema_1.session).set({ revokedAt: now, revokeReason: reason, updatedAt: now }).where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.session.userId, userId), (0, drizzle_orm_1.isNull)(schema_1.session.revokedAt)));
+        return devices.length;
+    }
+    async currentTier(tx, userId) {
+        const [row] = await tx.orm
+            .select({ id: schema_1.permissionSet.id, code: schema_1.permissionSet.code, roleCode: schema_1.permissionSet.roleCode, tierRank: schema_1.permissionSet.tierRank })
+            .from(schema_1.userPermissionSet)
+            .innerJoin(schema_1.permissionSet, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.permissionSet.id, schema_1.userPermissionSet.permissionSetId), (0, drizzle_orm_1.eq)(schema_1.permissionSet.kind, 'TIER')))
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.userPermissionSet.userId, userId), (0, drizzle_orm_1.eq)(schema_1.userPermissionSet.status, 'Active')));
+        return row ?? null;
+    }
+    async guardTarget(tx, grantorId, targetUserId, next) {
+        const current = await this.currentTier(tx, targetUserId);
+        if (current?.roleCode === 'ADM')
+            await this.requireAuthority(tx, grantorId, current);
+        if (current?.code === PRIMARY_TIER && next?.code !== PRIMARY_TIER && (await this.otherPrimaryAdministrators(tx, targetUserId)) === 0) {
+            throw fail('LAST_PRIMARY_ADMINISTRATOR', common_1.HttpStatus.CONFLICT);
+        }
+    }
+    async otherPrimaryAdministrators(tx, exceptUserId) {
+        const [row] = await tx.orm
+            .select({ n: (0, drizzle_orm_1.count)() })
+            .from(schema_1.userPermissionSet)
+            .innerJoin(schema_1.permissionSet, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.permissionSet.id, schema_1.userPermissionSet.permissionSetId), (0, drizzle_orm_1.eq)(schema_1.permissionSet.code, PRIMARY_TIER)))
+            .innerJoin(schema_1.appUser, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.appUser.id, schema_1.userPermissionSet.userId), (0, drizzle_orm_1.eq)(schema_1.appUser.accountStatus, 'Active'), (0, drizzle_orm_1.isNull)(schema_1.appUser.deletedAt)))
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.userPermissionSet.status, 'Active'), (0, drizzle_orm_1.ne)(schema_1.userPermissionSet.userId, exceptUserId), (0, drizzle_orm_1.sql) `(${schema_1.userPermissionSet.expiresAt} is null or ${schema_1.userPermissionSet.expiresAt} > now())`));
+        return row.n;
     }
     async applyAssignment(tx, userId, userRoleId, tierId, areaIds, grantedBy) {
         await tx.orm.insert(schema_1.userPermissionSet).values({ userId, permissionSetId: tierId, status: 'Active', grantedBy, effectiveFrom: new Date() });
@@ -203,8 +346,8 @@ let StaffService = class StaffService {
         const [row] = await tx.orm
             .select({ id: schema_1.userPermissionSet.id })
             .from(schema_1.userPermissionSet)
-            .innerJoin(schema_1.permissionSet, (0, drizzle_orm_1.eq)(schema_1.permissionSet.id, schema_1.userPermissionSet.permissionSetId))
-            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.userPermissionSet.userId, grantorId), (0, drizzle_orm_1.eq)(schema_1.userPermissionSet.status, 'Active'), (0, drizzle_orm_1.sql) `${schema_1.userPermissionSet.effectiveFrom} <= now()`, (0, drizzle_orm_1.sql) `(${schema_1.userPermissionSet.expiresAt} is null or ${schema_1.userPermissionSet.expiresAt} > now())`, (0, drizzle_orm_1.eq)(schema_1.permissionSet.kind, 'TIER'), (0, drizzle_orm_1.eq)(schema_1.permissionSet.roleCode, 'ADM'), (0, drizzle_orm_1.sql) `coalesce(${schema_1.permissionSet.tierRank}, 0) >= ${tier.tierRank ?? 0}`))
+            .innerJoin(schema_1.permissionSet, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.permissionSet.id, schema_1.userPermissionSet.permissionSetId), (0, drizzle_orm_1.eq)(schema_1.permissionSet.code, PRIMARY_TIER)))
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.userPermissionSet.userId, grantorId), (0, drizzle_orm_1.eq)(schema_1.userPermissionSet.status, 'Active'), (0, drizzle_orm_1.sql) `${schema_1.userPermissionSet.effectiveFrom} <= now()`, (0, drizzle_orm_1.sql) `(${schema_1.userPermissionSet.expiresAt} is null or ${schema_1.userPermissionSet.expiresAt} > now())`))
             .limit(1);
         if (!row)
             throw new common_1.HttpException({ code: 'TIER_ABOVE_GRANTOR' }, common_1.HttpStatus.FORBIDDEN);
@@ -229,6 +372,7 @@ exports.StaffService = StaffService = __decorate([
         password_service_1.PasswordService,
         sms_port_1.SmsSender,
         outbox_service_1.OutboxService,
-        audit_service_1.AuditService])
+        audit_service_1.AuditService,
+        status_history_service_1.StatusHistoryService])
 ], StaffService);
 //# sourceMappingURL=staff.service.js.map

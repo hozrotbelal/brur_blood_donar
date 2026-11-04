@@ -139,6 +139,9 @@ export function WorkQueue() {
                   <th scope="col">{t('queue.col.status')}</th>
                   <th scope="col">{t('queue.col.openedAt')}</th>
                   <th scope="col">{t('queue.col.overdue')}</th>
+                  <th scope="col">
+                    <span className="sr-only">{t('queue.open')}</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -159,6 +162,11 @@ export function WorkQueue() {
                       ) : (
                         t('queue.overdue.no')
                       )}
+                    </td>
+                    <td>
+                      <Link href={`/cases/${item.id}`} className="btn btn-small">
+                        {t('queue.open')}
+                      </Link>
                     </td>
                   </tr>
                 ))}

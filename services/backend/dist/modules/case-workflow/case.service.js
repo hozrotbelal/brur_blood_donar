@@ -14,12 +14,17 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.CaseService = void 0;
 const common_1 = require("@nestjs/common");
+const drizzle_orm_1 = require("drizzle-orm");
 const node_crypto_1 = require("node:crypto");
 const database_service_1 = require("../../platform/db/database.service");
 const status_history_service_1 = require("../../platform/status/status-history.service");
+const read_model_public_1 = require("../appointments/read-model.public");
+const read_model_public_2 = require("../identity/read-model.public");
 const request_public_1 = require("../request/request.public");
+const read_model_public_3 = require("../request/read-model.public");
 const case_support_1 = require("./case.support");
 const case_status_1 = require("./case-status");
+const schema_1 = require("./schema");
 const DUE_MINUTES = { Critical: 120, High: 360, Normal: 1440 };
 const FOLLOW_UP_EXTRA_MINUTES = 4320;
 const CONFIRM_TIMEOUT_MINUTES = { Critical: 15, High: 60, Normal: 60 };
@@ -33,19 +38,19 @@ let CaseService = class CaseService {
         this.history = history;
     }
     async linkAvailableDonor(tx, input) {
-        const req = await tx.query('SELECT urgency, area_id, assigned_support_user_id, status FROM req.blood_request WHERE id = $1', [input.requestId]);
-        const r = req.rows[0];
+        const r = await (0, request_public_1.requestState)(tx, input.requestId);
         if (!r)
             return;
-        let caseRow = (await tx.query(`SELECT c.id, c.case_no, c.request_id, c.status, c.owner_user_id, c.priority, c.area_id, c.disputed, c.version
-           FROM crd.coordination_case c WHERE c.request_id = $1 FOR UPDATE`, [input.requestId])).rows[0];
+        let [caseRow] = (await tx.orm.select(case_support_1.CASE_COLUMNS).from(schema_1.coordinationCase).where((0, drizzle_orm_1.eq)(schema_1.coordinationCase.requestId, input.requestId)).for('update'));
         if (!caseRow) {
             const priority = r.urgency === 'Critical' ? 'Critical' : r.urgency === 'Urgent' ? 'High' : 'Normal';
-            const created = await tx.query(`INSERT INTO crd.coordination_case (case_no, request_id, status, owner_user_id, priority, area_id, opened_at)
-         VALUES ('CASE-' || to_char(now(), 'YYYY') || '-' || lpad(nextval('crd.coordination_case_no_seq')::text, 6, '0'),
-                 $1, 'Open', $2, $3::priority, $4, now())
-         RETURNING id, case_no, request_id, status, owner_user_id, priority, area_id, disputed, version`, [input.requestId, r.assigned_support_user_id, priority, r.area_id]);
-            caseRow = created.rows[0];
+            [caseRow] = (await tx.orm
+                .insert(schema_1.coordinationCase)
+                .values({
+                caseNo: (0, drizzle_orm_1.sql) `'CASE-' || to_char(now(), 'YYYY') || '-' || lpad(nextval('crd.coordination_case_no_seq')::text, 6, '0')`,
+                requestId: input.requestId, status: 'Open', ownerUserId: r.assignedSupportUserId, priority, areaId: r.areaId, openedAt: (0, drizzle_orm_1.sql) `now()`,
+            })
+                .returning(case_support_1.CASE_COLUMNS));
             await this.history.record(tx, {
                 entityType: 'COORDINATION_CASE', entityId: caseRow.id, from: null, to: 'Open', actorUserId: null, actorRole: 'SYSTEM',
                 source: 'SYSTEM', contextRequestId: input.requestId, correlationId: (0, node_crypto_1.randomUUID)(),
@@ -55,7 +60,7 @@ let CaseService = class CaseService {
             await this.support.openTask(tx, caseRow, 'TK_CONFIRM_REPRESENTATIVE_NEXT_STEP', `representative:${caseRow.id}`, due);
             await this.support.openTask(tx, caseRow, 'TK_OBTAIN_SOURCED_OUTCOME', `outcome:${caseRow.id}`, due * 2);
             await this.support.openTask(tx, caseRow, 'TK_CLOSE_AND_FOLLOW_UP', `close:${caseRow.id}`, due * 2 + FOLLOW_UP_EXTRA_MINUTES);
-            await this.support.event(tx, 'COORDINATION_CASE', caseRow.id, 'CaseCreated', { requestId: input.requestId, caseNo: caseRow.case_no });
+            await this.support.event(tx, 'COORDINATION_CASE', caseRow.id, 'CaseCreated', { requestId: input.requestId, caseNo: caseRow.caseNo });
         }
         else if (caseRow.status === 'Needs replacement') {
             caseRow = await this.support.moveCase(tx, caseRow, 'Open', { userId: null, role: 'SYSTEM' }, 'Replacement donor available');
@@ -63,65 +68,104 @@ let CaseService = class CaseService {
         else if (!case_status_1.LIVE_CASE_STATUSES.includes(caseRow.status)) {
             return;
         }
-        const linked = await tx.query(`INSERT INTO crd.case_donor (case_id, donor_profile_id, invitation_id, status, joined_at)
-       VALUES ($1, $2, $3, 'Active', now()) ON CONFLICT DO NOTHING RETURNING id`, [caseRow.id, input.donorProfileId, input.invitationId]);
-        if (linked.rows[0]) {
-            await this.support.event(tx, 'COORDINATION_CASE', caseRow.id, 'DonorLinked', { caseDonorId: linked.rows[0].id }, Date.now());
+        const [linked] = await tx.orm
+            .insert(schema_1.caseDonor)
+            .values({ caseId: caseRow.id, donorProfileId: input.donorProfileId, invitationId: input.invitationId, status: 'Active', joinedAt: (0, drizzle_orm_1.sql) `now()` })
+            .onConflictDoNothing()
+            .returning({ id: schema_1.caseDonor.id });
+        if (linked) {
+            await this.support.event(tx, 'COORDINATION_CASE', caseRow.id, 'DonorLinked', { caseDonorId: linked.id }, Date.now());
         }
     }
     async handleDonorLeft(tx, input) {
-        const found = await tx.query(`SELECT id, case_id, status FROM crd.case_donor WHERE ${input.caseDonorId ? 'id' : 'invitation_id'} = $1 FOR UPDATE`, [input.caseDonorId ?? input.invitationId]);
-        const donor = found.rows[0];
+        const [donor] = await tx.orm
+            .select({ id: schema_1.caseDonor.id, caseId: schema_1.caseDonor.caseId, status: schema_1.caseDonor.status })
+            .from(schema_1.caseDonor)
+            .where(input.caseDonorId ? (0, drizzle_orm_1.eq)(schema_1.caseDonor.id, input.caseDonorId) : (0, drizzle_orm_1.eq)(schema_1.caseDonor.invitationId, input.invitationId))
+            .for('update');
         if (!donor || donor.status !== 'Active')
             return;
-        const caseRow = await this.support.loadCase(tx, donor.case_id, true);
+        const caseRow = await this.support.loadCase(tx, donor.caseId, true);
+        const actor = { userId: input.actorUserId, role: input.actorRole };
         const newStatus = input.kind === 'WITHDRAWN' ? 'Withdrawn' : input.kind === 'NO_SHOW' ? 'No-show' : 'Released';
-        await tx.query(`UPDATE crd.case_donor SET status = $2::case_donor_status, withdrawn_at = CASE WHEN $2 = 'Withdrawn' THEN now() ELSE withdrawn_at END,
-              released_at = CASE WHEN $2 = 'Released' THEN now() ELSE released_at END, version = version + 1, updated_at = now() WHERE id = $1`, [donor.id, newStatus]);
-        const live = await tx.query(`SELECT id, status FROM crd.appointment WHERE case_donor_id = $1 AND status IN ('Proposed','Confirmed','Checked-in')`, [donor.id]);
-        for (const a of live.rows) {
+        await tx.orm
+            .update(schema_1.caseDonor)
+            .set({
+            status: newStatus,
+            ...(newStatus === 'Withdrawn' ? { withdrawnAt: (0, drizzle_orm_1.sql) `now()` } : newStatus === 'Released' ? { releasedAt: (0, drizzle_orm_1.sql) `now()` } : {}),
+            version: (0, drizzle_orm_1.sql) `${schema_1.caseDonor.version} + 1`, updatedAt: (0, drizzle_orm_1.sql) `now()`,
+        })
+            .where((0, drizzle_orm_1.eq)(schema_1.caseDonor.id, donor.id));
+        const live = await tx.orm
+            .select({ id: schema_1.appointment.id, status: schema_1.appointment.status })
+            .from(schema_1.appointment)
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.appointment.caseDonorId, donor.id), (0, drizzle_orm_1.inArray)(schema_1.appointment.status, ['Proposed', 'Confirmed', 'Checked-in'])));
+        for (const a of live) {
             if (a.status === 'Checked-in')
                 continue;
-            await this.support.moveAppointment(tx, a.id, caseRow.request_id, a.status, 'Cancelled', { userId: input.actorUserId, role: input.actorRole }, ', cancelled_at = now(), reminders_stopped = true');
+            await this.support.moveAppointment(tx, a.id, caseRow.requestId, a.status, 'Cancelled', actor, { cancelledAt: (0, drizzle_orm_1.sql) `now()`, remindersStopped: true });
         }
-        const others = await tx.query(`SELECT count(*)::int AS n FROM crd.case_donor WHERE case_id = $1 AND status = 'Active'`, [caseRow.id]);
-        if (others.rows[0].n === 0) {
+        const [others] = await tx.orm.select({ n: (0, drizzle_orm_1.count)() }).from(schema_1.caseDonor).where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.caseDonor.caseId, caseRow.id), (0, drizzle_orm_1.eq)(schema_1.caseDonor.status, 'Active')));
+        if (others.n === 0) {
             if (case_status_1.LIVE_CASE_STATUSES.includes(caseRow.status) && caseRow.status !== 'Needs replacement' && caseRow.status !== 'Outcome pending') {
-                await this.support.moveCase(tx, caseRow, 'Needs replacement', { userId: input.actorUserId, role: input.actorRole }, input.kind);
+                await this.support.moveCase(tx, caseRow, 'Needs replacement', actor, input.kind);
             }
-            const request = await tx.query('SELECT status FROM req.blood_request WHERE id = $1 FOR UPDATE', [caseRow.request_id]);
-            if (request.rows[0]?.status === 'Donor coordination' && (0, request_public_1.findTransition)('Donor coordination', 'withdrawal_or_no_show')) {
-                await tx.query(`UPDATE req.blood_request SET status = 'Searching', version = version + 1, updated_at = now() WHERE id = $1`, [caseRow.request_id]);
-                await this.history.record(tx, {
-                    entityType: 'BLOOD_REQUEST', entityId: caseRow.request_id, from: 'Donor coordination', to: 'Searching', actorUserId: input.actorUserId,
-                    actorRole: input.actorRole, source: input.actorUserId ? 'USER' : 'SYSTEM',
-                    contextRequestId: caseRow.request_id, reasonCode: input.kind, correlationId: (0, node_crypto_1.randomUUID)(),
-                }, request_public_1.requestStateMachine);
-            }
+            const request = await (0, request_public_1.requestState)(tx, caseRow.requestId, true);
+            if (request?.status === 'Donor coordination')
+                await (0, request_public_1.returnToSearching)(tx, this.history, caseRow.requestId, 'Donor coordination', actor, input.kind);
         }
         await this.support.openTask(tx, caseRow, 'TK_HANDLE_WITHDRAWAL_NOSHOW', `leave:${donor.id}`, DUE_MINUTES[caseRow.priority] ?? 1440, donor.id);
         await this.support.event(tx, 'COORDINATION_CASE', caseRow.id, 'DonorLeftCase', { caseDonorId: donor.id, kind: input.kind }, Date.now());
     }
     async list(principal) {
-        const { rows } = await this.db.query(`SELECT c.id, c.case_no, c.status, c.priority, c.request_id, r.reference_no, c.opened_at, c.is_overdue
-         FROM crd.coordination_case c JOIN req.blood_request r ON r.id = c.request_id
-        WHERE c.owner_user_id = $1 AND c.status <> 'Closed'
-        ORDER BY (c.priority = 'Critical') DESC, (c.priority = 'High') DESC, c.opened_at LIMIT 100`, [principal.userId]);
-        return rows.map((c) => ({ id: c.id, caseNo: c.case_no, status: c.status, priority: c.priority, requestId: c.request_id, requestReference: c.reference_no, openedAt: c.opened_at, overdue: c.is_overdue }));
+        const rows = await this.db.orm
+            .select({
+            id: schema_1.coordinationCase.id, caseNo: schema_1.coordinationCase.caseNo, status: schema_1.coordinationCase.status, priority: schema_1.coordinationCase.priority,
+            requestId: schema_1.coordinationCase.requestId, openedAt: schema_1.coordinationCase.openedAt, overdue: schema_1.coordinationCase.isOverdue,
+        })
+            .from(schema_1.coordinationCase)
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.coordinationCase.ownerUserId, principal.userId), (0, drizzle_orm_1.ne)(schema_1.coordinationCase.status, 'Closed')))
+            .orderBy((0, drizzle_orm_1.desc)((0, drizzle_orm_1.sql) `${schema_1.coordinationCase.priority} = 'Critical'`), (0, drizzle_orm_1.desc)((0, drizzle_orm_1.sql) `${schema_1.coordinationCase.priority} = 'High'`), (0, drizzle_orm_1.asc)(schema_1.coordinationCase.openedAt))
+            .limit(100);
+        const routing = await (0, read_model_public_3.requestRouting)(this.db, rows.map((c) => c.requestId));
+        return rows.map((c) => ({ ...c, requestReference: routing.get(c.requestId)?.referenceNo ?? null }));
     }
     async detail(principal, caseId) {
         const row = await this.support.loadCase(this.db, caseId, false);
         await this.support.requireAccess(this.db, principal, row, 'case.view');
-        const q = (sql) => this.db.query(sql, [caseId]).then((r) => r.rows);
-        const [donors, appointments, tasks, notes, contacts, outcomes] = await Promise.all([
-            q(`SELECT cd.id, d.donor_code, cd.status, cd.joined_at FROM crd.case_donor cd JOIN idn.donor_profile d ON d.id = cd.donor_profile_id WHERE cd.case_id = $1 ORDER BY cd.created_at`),
-            q(`SELECT a.id, a.case_donor_id, a.facility_id, f.name_en AS facility, a.scheduled_start, a.status, a.previous_appointment_id FROM crd.appointment a LEFT JOIN apt.facility f ON f.id = a.facility_id WHERE a.case_id = $1 ORDER BY a.created_at`),
-            q(`SELECT id, task_type, status, due_at, assignee_user_id FROM crd.case_task WHERE case_id = $1 ORDER BY created_at`),
-            q(`SELECT id, note_type, body, author_user_id, created_at FROM crd.case_note WHERE case_id = $1 ORDER BY created_at`),
-            q(`SELECT id, target_party, channel, result, attempted_by, attempted_at FROM crd.contact_attempt WHERE case_id = $1 ORDER BY attempted_at`),
-            q(`SELECT id, outcome_type, source_type, confidence, units_count, reported_by_name, reported_by_role, channel, reported_at, is_disputed FROM crd.outcome_update WHERE case_id = $1 ORDER BY reported_at`),
+        const orm = this.db.orm;
+        const [donorRows, appointmentRows, tasks, notes, contacts, outcomes] = await Promise.all([
+            orm.select({ id: schema_1.caseDonor.id, donorProfileId: schema_1.caseDonor.donorProfileId, status: schema_1.caseDonor.status, joinedAt: schema_1.caseDonor.joinedAt })
+                .from(schema_1.caseDonor).where((0, drizzle_orm_1.eq)(schema_1.caseDonor.caseId, caseId)).orderBy((0, drizzle_orm_1.asc)(schema_1.caseDonor.createdAt)),
+            orm.select({
+                id: schema_1.appointment.id, caseDonorId: schema_1.appointment.caseDonorId, facilityId: schema_1.appointment.facilityId, scheduledStart: schema_1.appointment.scheduledStart,
+                status: schema_1.appointment.status, previousAppointmentId: schema_1.appointment.previousAppointmentId,
+            }).from(schema_1.appointment).where((0, drizzle_orm_1.eq)(schema_1.appointment.caseId, caseId)).orderBy((0, drizzle_orm_1.asc)(schema_1.appointment.createdAt)),
+            orm.select({ id: schema_1.caseTask.id, taskType: schema_1.caseTask.taskType, status: schema_1.caseTask.status, dueAt: schema_1.caseTask.dueAt, assigneeUserId: schema_1.caseTask.assigneeUserId })
+                .from(schema_1.caseTask).where((0, drizzle_orm_1.eq)(schema_1.caseTask.caseId, caseId)).orderBy((0, drizzle_orm_1.asc)(schema_1.caseTask.createdAt)),
+            orm.select({ id: schema_1.caseNote.id, noteType: schema_1.caseNote.noteType, body: schema_1.caseNote.body, authorUserId: schema_1.caseNote.authorUserId, createdAt: schema_1.caseNote.createdAt })
+                .from(schema_1.caseNote).where((0, drizzle_orm_1.eq)(schema_1.caseNote.caseId, caseId)).orderBy((0, drizzle_orm_1.asc)(schema_1.caseNote.createdAt)),
+            orm.select({
+                id: schema_1.contactAttempt.id, targetParty: schema_1.contactAttempt.targetParty, channel: schema_1.contactAttempt.channel, result: schema_1.contactAttempt.result,
+                attemptedBy: schema_1.contactAttempt.attemptedBy, attemptedAt: schema_1.contactAttempt.attemptedAt,
+            }).from(schema_1.contactAttempt).where((0, drizzle_orm_1.eq)(schema_1.contactAttempt.caseId, caseId)).orderBy((0, drizzle_orm_1.asc)(schema_1.contactAttempt.attemptedAt)),
+            orm.select({
+                id: schema_1.outcomeUpdate.id, outcomeType: schema_1.outcomeUpdate.outcomeType, sourceType: schema_1.outcomeUpdate.sourceType, confidence: schema_1.outcomeUpdate.confidence,
+                units: schema_1.outcomeUpdate.unitsCount, reportedByName: schema_1.outcomeUpdate.reportedByName, reportedByRole: schema_1.outcomeUpdate.reportedByRole,
+                channel: schema_1.outcomeUpdate.channel, reportedAt: schema_1.outcomeUpdate.reportedAt, disputed: schema_1.outcomeUpdate.isDisputed, supersedesId: schema_1.outcomeUpdate.supersedesId,
+            }).from(schema_1.outcomeUpdate).where((0, drizzle_orm_1.eq)(schema_1.outcomeUpdate.caseId, caseId)).orderBy((0, drizzle_orm_1.asc)(schema_1.outcomeUpdate.reportedAt)),
         ]);
-        return { id: row.id, caseNo: row.case_no, requestId: row.request_id, status: row.status, priority: row.priority, ownerUserId: row.owner_user_id, disputed: row.disputed, donors, appointments, tasks, notes, contacts, outcomes };
+        const [labels, facilities, routing] = await Promise.all([
+            (0, read_model_public_2.donorLabels)(this.db, donorRows.map((d) => d.donorProfileId)),
+            (0, read_model_public_1.facilityNames)(this.db, appointmentRows.map((a) => a.facilityId)),
+            (0, read_model_public_3.requestRouting)(this.db, [row.requestId]),
+        ]);
+        const donors = donorRows.map((d) => ({ id: d.id, donorCode: labels.get(d.donorProfileId)?.donorCode ?? null, status: d.status, joinedAt: d.joinedAt }));
+        const appointments = appointmentRows.map((a) => ({ ...a, facility: facilities.get(a.facilityId)?.nameEn ?? null }));
+        return {
+            id: row.id, caseNo: row.caseNo, requestId: row.requestId, requestReference: routing.get(row.requestId)?.referenceNo ?? null, status: row.status,
+            priority: row.priority, ownerUserId: row.ownerUserId, disputed: row.disputed, donors, appointments, tasks, notes, contacts, outcomes,
+        };
     }
     async startScheduling(principal, caseId) {
         return this.db.transaction(async (tx) => {
@@ -139,8 +183,7 @@ let CaseService = class CaseService {
         return this.db.transaction(async (tx) => {
             const row = await this.support.loadCase(tx, caseId, false);
             await this.support.requireAccess(tx, principal, row, 'case.edit');
-            const note = await tx.query(`INSERT INTO crd.case_note (case_id, author_user_id, note_type, body) VALUES ($1, $2, $3::note_type, $4) RETURNING id`, [caseId, principal.userId, dto.noteType ?? 'GENERAL', dto.body]);
-            return { id: note.rows[0].id };
+            return this.insertNote(tx, caseId, principal.userId, (dto.noteType ?? 'GENERAL'), dto.body);
         });
     }
     async logContact(principal, caseId, dto) {
@@ -148,16 +191,20 @@ let CaseService = class CaseService {
             const row = await this.support.loadCase(tx, caseId, false);
             await this.support.requireAccess(tx, principal, row, 'case.edit');
             if (dto.caseDonorId) {
-                const own = await tx.query('SELECT 1 FROM crd.case_donor WHERE id = $1 AND case_id = $2', [dto.caseDonorId, caseId]);
-                if (!own.rows[0])
+                const [own] = await tx.orm.select({ id: schema_1.caseDonor.id }).from(schema_1.caseDonor).where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.caseDonor.id, dto.caseDonorId), (0, drizzle_orm_1.eq)(schema_1.caseDonor.caseId, caseId)));
+                if (!own)
                     throw new common_1.NotFoundException({ code: 'CASE_DONOR_NOT_FOUND' });
             }
-            const attempt = await tx.query(`INSERT INTO crd.contact_attempt (case_id, case_donor_id, facility_id, target_party, channel, result, attempted_by, attempted_at)
-         VALUES ($1, $2, $3, $4::contact_party, $5::contact_channel, $6::contact_result, $7, now()) RETURNING id`, [caseId, dto.caseDonorId ?? null, dto.facilityId ?? null, dto.party, dto.channel, dto.result, principal.userId]);
-            if (dto.externalPerson) {
-                await tx.query(`INSERT INTO crd.case_note (case_id, author_user_id, note_type, body) VALUES ($1, $2, 'EXTERNAL_CONTACT', $3)`, [caseId, principal.userId, dto.externalPerson]);
-            }
-            return { id: attempt.rows[0].id };
+            const [attempt] = await tx.orm
+                .insert(schema_1.contactAttempt)
+                .values({
+                caseId, caseDonorId: dto.caseDonorId ?? null, facilityId: dto.facilityId ?? null, targetParty: dto.party,
+                channel: dto.channel, result: dto.result, attemptedBy: principal.userId, attemptedAt: (0, drizzle_orm_1.sql) `now()`,
+            })
+                .returning({ id: schema_1.contactAttempt.id });
+            if (dto.externalPerson)
+                await this.insertNote(tx, caseId, principal.userId, 'EXTERNAL_CONTACT', dto.externalPerson);
+            return { id: attempt.id };
         });
     }
     async close(principal, caseId, note) {
@@ -168,27 +215,30 @@ let CaseService = class CaseService {
                 throw (0, case_support_1.fail)('CASE_NOT_RESOLVED');
             if (row.disputed)
                 throw (0, case_support_1.fail)('CASE_DISPUTED');
-            const request = await tx.query('SELECT status FROM req.blood_request WHERE id = $1 FOR UPDATE', [row.request_id]);
-            const status = request.rows[0].status;
+            const status = (await (0, request_public_1.requestState)(tx, row.requestId, true)).status;
             await this.support.finishTask(tx, caseId, 'TK_CLOSE_AND_FOLLOW_UP', principal.userId);
-            await tx.query(`INSERT INTO crd.case_note (case_id, author_user_id, note_type, body) VALUES ($1, $2, 'GENERAL', $3)`, [caseId, principal.userId, note]);
+            await this.insertNote(tx, caseId, principal.userId, 'GENERAL', note);
             await this.support.moveCase(tx, row, 'Closed', { userId: principal.userId, role: 'SUP' });
-            if (status === 'Fulfilled' || status === 'Partially fulfilled') {
-                await tx.query(`UPDATE req.blood_request SET status = 'Closed', closed_at = now(), version = version + 1, updated_at = now() WHERE id = $1`, [row.request_id]);
-                await this.history.record(tx, {
-                    entityType: 'BLOOD_REQUEST', entityId: row.request_id, from: status, to: 'Closed', actorUserId: principal.userId, actorRole: 'SUP',
-                    source: 'USER', contextRequestId: row.request_id, correlationId: (0, node_crypto_1.randomUUID)(),
-                }, request_public_1.requestStateMachine);
+            if (status === 'Fulfilled' || status === 'Partially fulfilled')
+                await (0, request_public_1.closeRequest)(tx, this.history, row.requestId, status, principal.userId);
+            const completed = await tx.orm
+                .select({ donorProfileId: schema_1.caseDonor.donorProfileId })
+                .from(schema_1.caseDonor)
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.caseDonor.caseId, caseId), (0, drizzle_orm_1.eq)(schema_1.caseDonor.status, 'Completed')));
+            if (completed.length > 0) {
+                await tx.orm.insert(schema_1.postDonationCheckin).values(completed.map((d) => ({ donorProfileId: d.donorProfileId, scheduledFor: (0, drizzle_orm_1.sql) `now() + interval '24 hours'` })));
             }
-            await tx.query(`INSERT INTO crd.post_donation_checkin (donor_profile_id, scheduled_for)
-         SELECT cd.donor_profile_id, now() + interval '24 hours' FROM crd.case_donor cd WHERE cd.case_id = $1 AND cd.status = 'Completed'`, [caseId]);
-            await this.support.event(tx, 'COORDINATION_CASE', caseId, 'CaseClosed', { requestId: row.request_id });
+            await this.support.event(tx, 'COORDINATION_CASE', caseId, 'CaseClosed', { requestId: row.requestId });
             return { id: caseId, status: 'Closed' };
         });
     }
     async advanceAttendance() {
-        const { rows } = await this.db.query(`SELECT DISTINCT c.id FROM crd.coordination_case c JOIN crd.appointment a ON a.case_id = c.id
-        WHERE c.status = 'Scheduled' AND a.status = 'Confirmed' AND a.scheduled_start <= now() LIMIT 100`);
+        const rows = await this.db.orm
+            .selectDistinct({ id: schema_1.coordinationCase.id })
+            .from(schema_1.coordinationCase)
+            .innerJoin(schema_1.appointment, (0, drizzle_orm_1.eq)(schema_1.appointment.caseId, schema_1.coordinationCase.id))
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.coordinationCase.status, 'Scheduled'), (0, drizzle_orm_1.eq)(schema_1.appointment.status, 'Confirmed'), (0, drizzle_orm_1.lte)(schema_1.appointment.scheduledStart, (0, drizzle_orm_1.sql) `now()`)))
+            .limit(100);
         for (const r of rows) {
             await this.db.transaction(async (tx) => {
                 const row = await this.support.loadCase(tx, r.id, true);
@@ -199,31 +249,32 @@ let CaseService = class CaseService {
         return rows.length;
     }
     async flagUnconfirmedDonors() {
-        const { rows } = await this.db.query(`SELECT cd.id, cd.case_id, cd.donor_profile_id
-         FROM crd.case_donor cd JOIN crd.coordination_case c ON c.id = cd.case_id
-        WHERE cd.status = 'Active' AND c.status::text = ANY($1::text[])
-          AND cd.joined_at <= now() - make_interval(mins => CASE WHEN c.priority = 'Critical' THEN $2::int ELSE $3::int END)
-          AND NOT EXISTS (SELECT 1 FROM crd.appointment a WHERE a.case_donor_id = cd.id AND a.confirmed_by_donor_at IS NOT NULL)
-          AND NOT EXISTS (SELECT 1 FROM crd.case_task t WHERE t.dedupe_key = 'donor-confirm-timeout:' || cd.id)
-        ORDER BY cd.joined_at LIMIT 50`, [case_status_1.LIVE_CASE_STATUSES, CONFIRM_TIMEOUT_MINUTES.Critical, CONFIRM_TIMEOUT_MINUTES.High]);
+        const confirmed = (db, caseDonorId) => db.orm.select({ id: schema_1.appointment.id }).from(schema_1.appointment).where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.appointment.caseDonorId, caseDonorId), (0, drizzle_orm_1.isNotNull)(schema_1.appointment.confirmedByDonorAt)));
+        const rows = await this.db.orm
+            .select({ id: schema_1.caseDonor.id, caseId: schema_1.caseDonor.caseId, donorProfileId: schema_1.caseDonor.donorProfileId })
+            .from(schema_1.caseDonor)
+            .innerJoin(schema_1.coordinationCase, (0, drizzle_orm_1.eq)(schema_1.coordinationCase.id, schema_1.caseDonor.caseId))
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.caseDonor.status, 'Active'), (0, drizzle_orm_1.inArray)(schema_1.coordinationCase.status, case_status_1.LIVE_CASE_STATUSES), (0, drizzle_orm_1.lte)(schema_1.caseDonor.joinedAt, (0, drizzle_orm_1.sql) `now() - make_interval(mins => CASE WHEN ${schema_1.coordinationCase.priority} = 'Critical' THEN ${CONFIRM_TIMEOUT_MINUTES.Critical}::int ELSE ${CONFIRM_TIMEOUT_MINUTES.High}::int END)`), (0, drizzle_orm_1.notExists)(confirmed(this.db, schema_1.caseDonor.id)), (0, drizzle_orm_1.notExists)(this.db.orm.select({ id: schema_1.caseTask.id }).from(schema_1.caseTask).where((0, drizzle_orm_1.eq)(schema_1.caseTask.dedupeKey, (0, drizzle_orm_1.sql) `'donor-confirm-timeout:' || ${schema_1.caseDonor.id}`)))))
+            .orderBy((0, drizzle_orm_1.asc)(schema_1.caseDonor.joinedAt))
+            .limit(50);
         for (const r of rows) {
             await this.db.transaction(async (tx) => {
-                const confirmed = await tx.query('SELECT 1 FROM crd.appointment WHERE case_donor_id = $1 AND confirmed_by_donor_at IS NOT NULL', [r.id]);
-                if (confirmed.rows[0])
+                if ((await confirmed(tx, r.id).limit(1)).length > 0)
                     return;
-                const caseRow = await this.support.loadCase(tx, r.case_id, true);
+                const caseRow = await this.support.loadCase(tx, r.caseId, true);
                 await this.support.openTask(tx, caseRow, 'TK_CALLBACK', `donor-confirm-timeout:${r.id}`, 0, r.id);
                 await this.support.event(tx, 'CASE_DONOR', r.id, 'DonorConfirmationTimedOut', {
-                    caseId: r.case_id,
+                    caseId: r.caseId,
                     caseDonorId: r.id,
-                    requestId: caseRow.request_id,
-                    donorProfileId: r.donor_profile_id,
+                    requestId: caseRow.requestId,
+                    donorProfileId: r.donorProfileId,
                 });
             });
         }
         return rows.length;
     }
     async reconcileClosedRequests() {
+        // Raw SQL: selects cases by request status in another module (ADR-16 rule 6).
         const { rows } = await this.db.query(`SELECT c.id FROM crd.coordination_case c JOIN req.blood_request r ON r.id = c.request_id
         WHERE c.status IN ('Open','Scheduling','Scheduled','Attendance pending','Needs replacement') AND r.status IN ('Cancelled','Unable to fulfil','Rejected') LIMIT 50`);
         for (const r of rows)
@@ -234,13 +285,22 @@ let CaseService = class CaseService {
         const row = await this.support.loadCase(tx, caseId, true);
         if (row.status === 'Resolved' || row.status === 'Closed')
             return;
-        const live = await tx.query(`SELECT id, status FROM crd.appointment WHERE case_id = $1 AND status IN ('Proposed','Confirmed')`, [row.id]);
-        for (const a of live.rows) {
-            await this.support.moveAppointment(tx, a.id, row.request_id, a.status, 'Cancelled', { userId: null, role: 'SYSTEM' }, ', cancelled_at = now(), reminders_stopped = true');
+        const live = await tx.orm
+            .select({ id: schema_1.appointment.id, status: schema_1.appointment.status })
+            .from(schema_1.appointment)
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.appointment.caseId, row.id), (0, drizzle_orm_1.inArray)(schema_1.appointment.status, ['Proposed', 'Confirmed'])));
+        for (const a of live) {
+            await this.support.moveAppointment(tx, a.id, row.requestId, a.status, 'Cancelled', { userId: null, role: 'SYSTEM' }, { cancelledAt: (0, drizzle_orm_1.sql) `now()`, remindersStopped: true });
         }
-        await tx.query(`UPDATE crd.case_task SET status = 'Cancelled', version = version + 1, updated_at = now()
-        WHERE case_id = $1 AND status IN ('Open','In progress') AND task_type <> 'TK_CLOSE_AND_FOLLOW_UP'`, [row.id]);
+        await tx.orm
+            .update(schema_1.caseTask)
+            .set({ status: 'Cancelled', version: (0, drizzle_orm_1.sql) `${schema_1.caseTask.version} + 1`, updatedAt: (0, drizzle_orm_1.sql) `now()` })
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.caseTask.caseId, row.id), (0, drizzle_orm_1.inArray)(schema_1.caseTask.status, ['Open', 'In progress']), (0, drizzle_orm_1.ne)(schema_1.caseTask.taskType, 'TK_CLOSE_AND_FOLLOW_UP')));
         await this.support.moveCase(tx, row, 'Resolved', { userId: null, role: 'SYSTEM' }, 'Request ended');
+    }
+    async insertNote(tx, caseId, authorUserId, noteType, body) {
+        const [note] = await tx.orm.insert(schema_1.caseNote).values({ caseId, authorUserId, noteType, body }).returning({ id: schema_1.caseNote.id });
+        return { id: note.id };
     }
 };
 exports.CaseService = CaseService;

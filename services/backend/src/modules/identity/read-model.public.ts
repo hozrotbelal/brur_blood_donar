@@ -1,6 +1,6 @@
-import { and, eq, isNotNull, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 import { Db } from '../../platform/db/database.service';
-import { appUser, consentRecord, device, notificationPreference } from './schema';
+import { appUser, consentRecord, device, donorProfile, notificationPreference } from './schema';
 
 export type UiLanguage = (typeof appUser.$inferSelect)['preferredLanguage'];
 export type NotificationCategory = (typeof notificationPreference.$inferSelect)['category'];
@@ -55,4 +55,24 @@ export async function hasSmsChannelConsent(db: Db, userId: string): Promise<bool
     .where(and(eq(consentRecord.userId, userId), eq(consentRecord.consentType, 'CHANNEL_SMS'), eq(consentRecord.granted, true), isNull(consentRecord.withdrawnAt)))
     .limit(1);
   return row !== undefined;
+}
+
+export interface DonorLabel {
+  donorCode: string;
+  bloodGroup: string | null;
+}
+
+export async function donorLabels(db: Db, donorProfileIds: string[]): Promise<Map<string, DonorLabel>> {
+  const unique = [...new Set(donorProfileIds)];
+  if (unique.length === 0) return new Map();
+  const rows = await db.orm
+    .select({ id: donorProfile.id, donorCode: donorProfile.donorCode, bloodGroup: donorProfile.bloodGroup })
+    .from(donorProfile)
+    .where(inArray(donorProfile.id, unique));
+  return new Map(rows.map(({ id, ...rest }) => [id, rest]));
+}
+
+export async function donorProfileIdOf(db: Db, userId: string): Promise<string | null> {
+  const [row] = await db.orm.select({ id: donorProfile.id }).from(donorProfile).where(eq(donorProfile.userId, userId));
+  return row?.id ?? null;
 }

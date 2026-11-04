@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.latestOutcomeConfidence = latestOutcomeConfidence;
 exports.caseOwnersForRequest = caseOwnersForRequest;
+exports.openCasesOwnedBy = openCasesOwnedBy;
 const drizzle_orm_1 = require("drizzle-orm");
 const schema_1 = require("./schema");
 async function latestOutcomeConfidence(db, requestIds) {
@@ -24,5 +25,11 @@ async function caseOwnersForRequest(db, requestId) {
         .from(schema_1.coordinationCase)
         .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.coordinationCase.requestId, requestId), (0, drizzle_orm_1.isNotNull)(schema_1.coordinationCase.ownerUserId)));
     return [...new Set(rows.map((r) => r.ownerUserId))];
+}
+async function openCasesOwnedBy(db, userId) {
+    return db.orm
+        .select({ id: schema_1.coordinationCase.id, caseNo: schema_1.coordinationCase.caseNo, requestId: schema_1.coordinationCase.requestId })
+        .from(schema_1.coordinationCase)
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.coordinationCase.ownerUserId, userId), (0, drizzle_orm_1.notInArray)(schema_1.coordinationCase.status, ['Resolved', 'Closed'])));
 }
 //# sourceMappingURL=read-model.public.js.map

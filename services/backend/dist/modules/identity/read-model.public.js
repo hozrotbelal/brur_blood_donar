@@ -5,6 +5,8 @@ exports.phoneOf = phoneOf;
 exports.activePushDevices = activePushDevices;
 exports.channelPreference = channelPreference;
 exports.hasSmsChannelConsent = hasSmsChannelConsent;
+exports.donorLabels = donorLabels;
+exports.donorProfileIdOf = donorProfileIdOf;
 const drizzle_orm_1 = require("drizzle-orm");
 const schema_1 = require("./schema");
 async function preferredLanguage(db, userId) {
@@ -45,5 +47,19 @@ async function hasSmsChannelConsent(db, userId) {
         .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.consentRecord.userId, userId), (0, drizzle_orm_1.eq)(schema_1.consentRecord.consentType, 'CHANNEL_SMS'), (0, drizzle_orm_1.eq)(schema_1.consentRecord.granted, true), (0, drizzle_orm_1.isNull)(schema_1.consentRecord.withdrawnAt)))
         .limit(1);
     return row !== undefined;
+}
+async function donorLabels(db, donorProfileIds) {
+    const unique = [...new Set(donorProfileIds)];
+    if (unique.length === 0)
+        return new Map();
+    const rows = await db.orm
+        .select({ id: schema_1.donorProfile.id, donorCode: schema_1.donorProfile.donorCode, bloodGroup: schema_1.donorProfile.bloodGroup })
+        .from(schema_1.donorProfile)
+        .where((0, drizzle_orm_1.inArray)(schema_1.donorProfile.id, unique));
+    return new Map(rows.map(({ id, ...rest }) => [id, rest]));
+}
+async function donorProfileIdOf(db, userId) {
+    const [row] = await db.orm.select({ id: schema_1.donorProfile.id }).from(schema_1.donorProfile).where((0, drizzle_orm_1.eq)(schema_1.donorProfile.userId, userId));
+    return row?.id ?? null;
 }
 //# sourceMappingURL=read-model.public.js.map

@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNotNull } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, notInArray } from 'drizzle-orm';
 import { Db } from '../../platform/db/database.service';
 import { coordinationCase, outcomeUpdate } from './schema';
 
@@ -22,4 +22,11 @@ export async function caseOwnersForRequest(db: Db, requestId: string): Promise<s
     .from(coordinationCase)
     .where(and(eq(coordinationCase.requestId, requestId), isNotNull(coordinationCase.ownerUserId)));
   return [...new Set(rows.map((r) => r.ownerUserId as string))];
+}
+
+export async function openCasesOwnedBy(db: Db, userId: string): Promise<{ id: string; caseNo: string; requestId: string }[]> {
+  return db.orm
+    .select({ id: coordinationCase.id, caseNo: coordinationCase.caseNo, requestId: coordinationCase.requestId })
+    .from(coordinationCase)
+    .where(and(eq(coordinationCase.ownerUserId, userId), notInArray(coordinationCase.status, ['Resolved', 'Closed'])));
 }

@@ -68,3 +68,60 @@ export const fetchInvitations = () => apiCall<InvitationRow[]>('GET', invitation
 export const createInvitation = (body: InviteBody) => apiCall<InviteCreated>('POST', invitations, body);
 export const revokeInvitation = (id: string) => apiCall<unknown>('POST', `${invitations}/${id}/revoke`);
 export const fetchAreas = () => apiCall<AreaPage>('GET', '/api/v1/areas?limit=200');
+
+export type CaseDetail = components['schemas']['CaseDetailDto'];
+export type CaseOutcome = components['schemas']['CaseOutcomeDto'];
+export type CaseAppointment = components['schemas']['CaseAppointmentDto'];
+export type ContactBody = components['schemas']['ContactAttemptDto'];
+export type OutcomeBody = components['schemas']['RecordOutcomeDto'];
+export type ResolveDisputeBody = components['schemas']['ResolveDisputeDto'];
+export type FacilityPage = components['schemas']['FacilityPageDto'];
+
+const cases = '/api/v1/staff/cases';
+
+export const fetchCaseDetail = (id: string) => apiCall<CaseDetail>('GET', `${cases}/${id}`);
+export const startScheduling = (id: string) => apiCall<unknown>('POST', `${cases}/${id}/start-scheduling`);
+export const addCaseNote = (id: string, body: string) => apiCall<unknown>('POST', `${cases}/${id}/notes`, { body });
+export const logContact = (id: string, body: ContactBody) => apiCall<unknown>('POST', `${cases}/${id}/contact-attempts`, body);
+export const proposeAppointment = (id: string, body: { caseDonorId: string; facilityId: string; scheduledStart: string }) =>
+  apiCall<unknown>('POST', `${cases}/${id}/appointments`, body);
+export const rescheduleAppointment = (appointmentId: string, scheduledStart: string) =>
+  apiCall<unknown>('POST', `/api/v1/staff/appointments/${appointmentId}/reschedule`, { scheduledStart });
+export const markNoShow = (appointmentId: string) => apiCall<unknown>('POST', `/api/v1/staff/appointments/${appointmentId}/no-show`);
+export const recordOutcome = (id: string, body: OutcomeBody) => apiCall<unknown>('POST', `${cases}/${id}/outcomes`, body);
+export const disputeOutcome = (id: string, outcomeId: string, reason: string) =>
+  apiCall<unknown>('POST', `${cases}/${id}/outcomes/${outcomeId}/dispute`, { reason });
+export const resolveDispute = (id: string, outcomeId: string, body: ResolveDisputeBody) =>
+  apiCall<unknown>('POST', `${cases}/${id}/outcomes/${outcomeId}/resolve-dispute`, body);
+export const setFulfilment = (id: string) => apiCall<unknown>('POST', `${cases}/${id}/fulfilment`);
+export const answerMoreDonors = (id: string, needed: boolean) => apiCall<unknown>('POST', `${cases}/${id}/more-donors`, { needed });
+export const closeCase = (id: string, note: string) => apiCall<unknown>('POST', `${cases}/${id}/close`, { note });
+export const declareUnable = (requestId: string, reason: string) =>
+  apiCall<unknown>('POST', `/api/v1/staff/requests/${requestId}/declare-unable`, { reason });
+export const fetchAppointmentFacilities = async () => {
+  const pages = await Promise.all(
+    (['COLLECTION_SERVICE', 'HOSPITAL'] as const).map((type) => apiCall<FacilityPage>('GET', `/api/v1/facilities?type=${type}&limit=200`)),
+  );
+  return pages.flatMap((page) => page.items);
+};
+
+export type StaffMember = components['schemas']['StaffMemberDto'];
+export type StaffDeactivated = components['schemas']['StaffDeactivatedDto'];
+export type PermissionSetView = components['schemas']['PermissionSetViewDto'];
+export type AccessReview = components['schemas']['AccessReviewDto'];
+export type GrantDecision = components['schemas']['GrantDecisionDto']['decision'];
+type OtpChallenge = components['schemas']['OtpChallengeDto'];
+
+const staffAdmin = '/api/v1/admin/staff';
+
+export const fetchStaff = () => apiCall<StaffMember[]>('GET', staffAdmin);
+export const changeStaffAssignment = (userId: string, body: { tierCode: string; areaIds: string[]; reason: string }) =>
+  apiCall<unknown>('POST', `${staffAdmin}/${userId}/assignment`, body);
+export const deactivateStaff = (userId: string, reason: string) => apiCall<StaffDeactivated>('POST', `${staffAdmin}/${userId}/deactivate`, { reason });
+export const resetStaffDevice = (userId: string, reason: string) => apiCall<unknown>('POST', `${staffAdmin}/${userId}/reset-device`, { reason });
+export const fetchPermissionSets = () => apiCall<PermissionSetView[]>('GET', '/api/v1/admin/permission-sets');
+export const fetchAccessReview = (month: string) => apiCall<AccessReview>('GET', `/api/v1/admin/access-review?month=${encodeURIComponent(month)}`);
+export const decideGrant = (grantId: string, decision: GrantDecision, reason: string) =>
+  apiCall<unknown>('POST', `/api/v1/admin/access-review/grants/${grantId}/decision`, { decision, reason });
+export const requestStepUpCode = () => apiCall<OtpChallenge>('POST', '/api/v1/auth/step-up/challenge');
+export const confirmStepUp = (challengeId: string, code: string) => apiCall<unknown>('POST', '/api/v1/auth/step-up', { challengeId, code });

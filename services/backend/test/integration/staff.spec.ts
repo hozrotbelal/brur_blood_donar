@@ -8,6 +8,8 @@ import { AuthService } from '../../src/modules/identity/auth.service';
 import { PasswordService } from '../../src/modules/identity/password.service';
 import { SmsSender } from '../../src/modules/identity/sms.port';
 import { StaffService } from '../../src/modules/identity/staff.service';
+import { AccessReviewService } from '../../src/modules/identity/access-review.service';
+import { StatusHistoryService } from '../../src/platform/status/status-history.service';
 import { TokenService } from '../../src/platform/security/token.service';
 import { buildAuth, setupTokenOf, testDevice } from './identity-harness';
 
@@ -26,6 +28,7 @@ suite('staff invitation and role assignment (needs TEST_DATABASE_URL with all mi
   let db: DatabaseService;
   let auth: AuthService;
   let staff: StaffService;
+  let reviews: AccessReviewService;
   const sms = new CapturingSms();
   const phone = () => `017${String(Math.floor(Math.random() * 1e8)).padStart(8, '0')}`;
 
@@ -52,7 +55,8 @@ suite('staff invitation and role assignment (needs TEST_DATABASE_URL with all mi
     const audit = new AuditService(outbox);
     const passwords = new PasswordService();
     auth = buildAuth(db, tokens, sms, outbox, audit, passwords);
-    staff = new StaffService(db, passwords, sms, outbox, audit);
+    staff = new StaffService(db, passwords, sms, outbox, audit, new StatusHistoryService(audit));
+    reviews = new AccessReviewService(db, staff, outbox, audit);
   });
   afterAll(() => db.onModuleDestroy());
 
@@ -124,5 +128,95 @@ suite('staff invitation and role assignment (needs TEST_DATABASE_URL with all mi
     const active = await db.query(`SELECT count(*)::int AS n FROM idn.user_permission_set u JOIN idn.permission_set s ON s.id = u.permission_set_id WHERE u.user_id = $1 AND u.status = 'Active' AND s.kind = 'TIER'`, [userId]);
     expect(active.rows[0].n).toBe(1);
     await expect(staff.changeAssignment(admin, randomUUID(), { tierCode: 'TIER_SUPPORT_LEAD', areaIds: [a2], reason: 'unknown user' })).rejects.toMatchObject({ status: 404 });
+  });
+
+  async function activeAgent(admin: Principal) {
+    const areaId = await area();
+    await staff.invite(admin, { phone: phone(), roleCode: 'SUP', tierCode: 'TIER_SUPPORT_AGENT', areaIds: [areaId] });
+    const { userId } = await staff.accept({ token: sms.last, password: 'correct horse battery staple', language: 'en' });
+    return { userId, areaId };
+  }
+
+  it('lists staff with role, tier, areas and status', async () => {
+    const admin = await newAdmin('TIER_PRIMARY_ADMINISTRATOR');
+    const { userId, areaId } = await activeAgent(admin);
+    const row = (await staff.staffList()).find((s) => s.userId === userId);
+    expect(row).toMatchObject({ roleCode: 'SUP', tierCode: 'TIER_SUPPORT_AGENT', areaIds: [areaId], status: 'Active' });
+    expect(row!.phoneLast4).toHaveLength(4);
+  });
+
+  it('lets only a Primary Administrator grant or change administrator rights (FR-CFG-026)', async () => {
+    const lowAdmin = await newAdmin('TIER_ADMINISTRATOR');
+    const otherAdmin = await newAdmin('TIER_ADMINISTRATOR');
+    await expect(staff.invite(lowAdmin, { phone: phone(), roleCode: 'ADM', tierCode: 'TIER_ADMINISTRATOR' })).rejects.toMatchObject({ response: { code: 'TIER_ABOVE_GRANTOR' } });
+    await expect(staff.deactivate(lowAdmin, otherAdmin.userId, 'Left the organization')).rejects.toMatchObject({ response: { code: 'TIER_ABOVE_GRANTOR' } });
+    await expect(staff.resetDevices(lowAdmin, otherAdmin.userId, 'Lost phone')).rejects.toMatchObject({ response: { code: 'TIER_ABOVE_GRANTOR' } });
+    const primary = await newAdmin('TIER_PRIMARY_ADMINISTRATOR');
+    await expect(staff.deactivate(primary, otherAdmin.userId, 'Left the organization')).resolves.toMatchObject({ status: 'Deactivated' });
+  });
+
+  it('deactivates a staff member: role and grants revoked, sessions ended, history written, open cases listed', async () => {
+    const admin = await newAdmin('TIER_PRIMARY_ADMINISTRATOR');
+    const { userId } = await activeAgent(admin);
+    await expect(staff.deactivate(admin, admin.userId, 'self removal')).rejects.toMatchObject({ response: { code: 'CANNOT_CHANGE_OWN_ASSIGNMENT' } });
+
+    const result = await staff.deactivate(admin, userId, 'Left the organization');
+    expect(result).toMatchObject({ userId, status: 'Deactivated', openCases: [] });
+    expect((await staff.staffList()).find((s) => s.userId === userId)).toMatchObject({ status: 'Deactivated', tierCode: null, areaIds: [] });
+    expect(await auth.loadGrants(userId, 'SUP')).toEqual([]);
+    const history = await db.query(`SELECT from_status, to_status, reason_code FROM aud.status_history WHERE entity_type = 'USER_ROLE' AND actor_user_id = $1 ORDER BY occurred_at DESC LIMIT 1`, [admin.userId]);
+    expect(history.rows[0]).toMatchObject({ from_status: 'Active', to_status: 'Revoked', reason_code: 'STAFF_DEACTIVATED' });
+    await expect(staff.deactivate(admin, userId, 'Left the organization')).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('resets a staff member device binding', async () => {
+    const admin = await newAdmin('TIER_PRIMARY_ADMINISTRATOR');
+    const { userId } = await activeAgent(admin);
+    await db.query(
+      `INSERT INTO idn.device (user_id, install_id, platform, device_model, os_version, app_version, is_trusted, staff_mfa_verified_at)
+       VALUES ($1, $2, 'android', 'Test', '14', '1.0', true, now())`,
+      [userId, randomUUID()],
+    );
+    expect(await staff.resetDevices(admin, userId, 'Lost phone')).toEqual({ userId, devicesRevoked: 1 });
+    const dev = await db.query('SELECT sign_out_status, is_trusted, staff_mfa_verified_at FROM idn.device WHERE user_id = $1', [userId]);
+    expect(dev.rows[0]).toMatchObject({ sign_out_status: 'Revoked', is_trusted: false, staff_mfa_verified_at: null });
+    expect((await staff.resetDevices(admin, userId, 'Lost phone again')).devicesRevoked).toBe(0);
+  });
+
+  it('shows permission sets with their keys and scopes', async () => {
+    const sets = await reviews.permissionSets();
+    const agent = sets.find((s) => s.code === 'TIER_SUPPORT_AGENT')!;
+    expect(agent).toMatchObject({ roleCode: 'SUP', kind: 'TIER', tierRank: 1 });
+    expect(agent.items.some((i) => i.key === 'case.edit')).toBe(true);
+  });
+
+  it('lists sensitive and time-limited grants for the monthly review and records keep and revoke decisions', async () => {
+    const admin = await newAdmin('TIER_PRIMARY_ADMINISTRATOR');
+    const { userId } = await activeAgent(admin);
+    const set = await db.query<{ id: string }>(
+      `INSERT INTO idn.permission_set (code, name_en, name_bn, role_code, kind) VALUES ($1, 'Review test', 'পর্যালোচনা পরীক্ষা', 'SUP', 'CUSTOM') RETURNING id`,
+      [`CUSTOM_${randomUUID()}`],
+    );
+    await db.query(
+      `INSERT INTO idn.permission_set_item (permission_set_id, permission_id, scope) SELECT $1, id, allowed_scopes[1] FROM idn.permission WHERE is_sensitive LIMIT 1`,
+      [set.rows[0].id],
+    );
+    const grant = await db.query<{ id: string }>(
+      `INSERT INTO idn.user_permission_set (user_id, permission_set_id, status, effective_from, expires_at) VALUES ($1, $2, 'Active', now(), now() + interval '30 days') RETURNING id`,
+      [userId, set.rows[0].id],
+    );
+    const grantId = grant.rows[0].id;
+
+    const member = (await reviews.review()).members.find((m) => m.userId === userId)!;
+    expect(member).toMatchObject({ roleCode: 'SUP', reveals: 0, searches: 0 });
+    expect(member.grants).toEqual([expect.objectContaining({ grantId, kind: 'CUSTOM', decision: null })]);
+    expect(member.grants[0].sensitiveKeys).toHaveLength(1);
+
+    await expect(reviews.decide(admin, grantId, { decision: 'KEEP', reason: 'Still covers night shifts' })).resolves.toEqual({ grantId, decision: 'KEEP' });
+    expect((await reviews.review()).members.find((m) => m.userId === userId)!.grants[0].decision).toBe('KEEP');
+
+    await reviews.decide(admin, grantId, { decision: 'REVOKE', reason: 'No longer needed' });
+    expect((await reviews.review()).members.find((m) => m.userId === userId)!.grants).toEqual([]);
+    await expect(reviews.decide(admin, grantId, { decision: 'KEEP', reason: 'too late now' })).rejects.toMatchObject({ status: 404 });
   });
 });

@@ -440,6 +440,8 @@ exports.userPermissionSet = exports.idnSchema.table('user_permission_set', {
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
     updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
     version: (0, pg_core_1.integer)('version').notNull().default(1),
+    lastReviewedAt: (0, pg_core_1.timestamp)('last_reviewed_at', { withTimezone: true, mode: 'date' }),
+    lastReviewedBy: (0, pg_core_1.uuid)('last_reviewed_by'),
 });
 exports.userRole = exports.idnSchema.table('user_role', {
     id: (0, pg_core_1.uuid)('id').primaryKey().defaultRandom(),

@@ -8,6 +8,7 @@ import { DonationRecordProjector } from './donation-record.projector';
 import { IdentityCoreModule } from './identity-core.module';
 import { SecurityController } from './security.controller';
 import { StaffController } from './staff.controller';
+import { AccessReviewService } from './access-review.service';
 import { StaffService } from './staff.service';
 import { WebAuthController } from './web-auth.controller';
 import { WebAuthService } from './web-auth.service';
@@ -15,7 +16,7 @@ import { WebAuthService } from './web-auth.service';
 @Module({
   imports: [IdentityCoreModule],
   controllers: [AuthController, SecurityController, WebAuthController, DonorController, StaffController],
-  providers: [AuthGuard, DonorService, StaffService, WebAuthService, DonationRecordProjector, StatusHistoryService],
+  providers: [AuthGuard, DonorService, StaffService, AccessReviewService, WebAuthService, DonationRecordProjector, StatusHistoryService],
   exports: [IdentityCoreModule, AuthGuard],
 })
 export class IdentityModule {}

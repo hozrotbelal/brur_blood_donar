@@ -14,14 +14,19 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.MatchingService = void 0;
 const common_1 = require("@nestjs/common");
+const drizzle_orm_1 = require("drizzle-orm");
 const node_crypto_1 = require("node:crypto");
 const database_service_1 = require("../../platform/db/database.service");
 const outbox_service_1 = require("../../platform/outbox/outbox.service");
 const area_scope_1 = require("../../platform/policy/area-scope");
 const policy_service_1 = require("../../platform/policy/policy.service");
 const status_history_service_1 = require("../../platform/status/status-history.service");
+const case_workflow_public_1 = require("../case-workflow/case-workflow.public");
+const read_model_public_1 = require("../configuration/read-model.public");
+const read_model_public_2 = require("../identity/read-model.public");
 const request_public_1 = require("../request/request.public");
 const matching_rules_1 = require("./matching.rules");
+const schema_1 = require("./schema");
 const DEFAULTS = {
     waveSizeDefault: 10,
     waveSizeCritical: 20,
@@ -51,10 +56,7 @@ let MatchingService = class MatchingService {
         this.outbox = outbox;
     }
     async loadSettings(db) {
-        const { rows } = await db.query(`SELECT DISTINCT ON (key) key, value FROM cfg.config_setting
-        WHERE key = ANY($1::text[]) AND status = 'Active' AND (scope_type IS NULL OR scope_type = 'GLOBAL')
-        ORDER BY key, version DESC`, [SETTING_KEYS]);
-        const v = new Map(rows.map((r) => [r.key, r.value]));
+        const v = await (0, read_model_public_1.activeGlobalSettings)(db, SETTING_KEYS);
         const num = (k, d) => (typeof v.get(k) === 'number' ? v.get(k) : d);
         const bool = (k, d) => (typeof v.get(k) === 'boolean' ? v.get(k) : d);
         const steps = v.get('search.radius_steps_km');
@@ -90,8 +92,12 @@ let MatchingService = class MatchingService {
         });
     }
     async startPendingSearches() {
+        // Raw SQL: cross-module read of request and case state (ADR-16 rule 6).
         const { rows } = await this.db.query(`SELECT r.id FROM req.blood_request r
+         LEFT JOIN apt.facility f ON f.id = r.hospital_facility_id
+         LEFT JOIN cfg.area a ON a.id = r.area_id
         WHERE r.status = 'Verified' AND r.deleted_at IS NULL AND NOT r.outreach_paused AND NOT r.has_moderation_hold
+          AND (r.location IS NOT NULL OR f.location IS NOT NULL OR a.centroid IS NOT NULL)
           AND NOT EXISTS (SELECT 1 FROM src.match_run m WHERE m.request_id = r.id) ORDER BY r.verified_at LIMIT 20`);
         let started = 0;
         for (const r of rows) {
@@ -107,6 +113,7 @@ let MatchingService = class MatchingService {
         return started;
     }
     async proposeNextWaves() {
+        // Raw SQL: cross-module read of request and case state (ADR-16 rule 6).
         const { rows } = await this.db.query(`SELECT DISTINCT m.request_id FROM src.match_run m JOIN req.blood_request r ON r.id = m.request_id
         WHERE m.status = 'Awaiting responses' AND m.response_window_ends_at <= now() AND r.status = 'Searching'
           AND NOT r.outreach_paused AND NOT r.has_moderation_hold
@@ -130,6 +137,7 @@ let MatchingService = class MatchingService {
         return proposed;
     }
     async proposeReplacementWaves() {
+        // Raw SQL: cross-module read of request and case state (ADR-16 rule 6).
         const { rows } = await this.db.query(`SELECT DISTINCT r.id AS request_id FROM req.blood_request r
          JOIN crd.coordination_case c ON c.request_id = r.id AND c.status = 'Needs replacement'
         WHERE r.status = 'Searching' AND r.deleted_at IS NULL AND NOT r.outreach_paused AND NOT r.has_moderation_hold
@@ -160,29 +168,41 @@ let MatchingService = class MatchingService {
             if (!['Verified', 'Searching', 'Donor coordination'].includes(req.status))
                 return { cancelled: 0, waveId: null };
             const correlationId = (0, node_crypto_1.randomUUID)();
-            const open = await tx.query(`SELECT id, status FROM src.invitation WHERE request_id = $1 AND status IN ('Queued','Sent','Delivered','Viewed') FOR UPDATE`, [req.id]);
-            for (const inv of open.rows) {
-                await tx.query(`UPDATE src.invitation SET status = 'Cancelled', cancel_reason = 'REQUEST_CHANGED', cancelled_at = now(), version = version + 1, updated_at = now()
-            WHERE id = $1`, [inv.id]);
+            const open = await tx.orm
+                .select({ id: schema_1.invitation.id, status: schema_1.invitation.status })
+                .from(schema_1.invitation)
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.invitation.requestId, req.id), (0, drizzle_orm_1.inArray)(schema_1.invitation.status, ['Queued', 'Sent', 'Delivered', 'Viewed'])))
+                .for('update');
+            for (const inv of open) {
+                await tx.orm
+                    .update(schema_1.invitation)
+                    .set({ status: 'Cancelled', cancelReason: 'REQUEST_CHANGED', cancelledAt: (0, drizzle_orm_1.sql) `now()`, version: (0, drizzle_orm_1.sql) `${schema_1.invitation.version} + 1`, updatedAt: (0, drizzle_orm_1.sql) `now()` })
+                    .where((0, drizzle_orm_1.eq)(schema_1.invitation.id, inv.id));
                 await this.history.record(tx, {
                     entityType: 'INVITATION', entityId: inv.id, from: inv.status, to: 'Cancelled', actorUserId: null, actorRole: 'SYSTEM',
                     source: 'SYSTEM', contextRequestId: req.id, reasonCode: 'REQUEST_CHANGED', correlationId,
                 });
             }
-            const stale = await tx.query(`SELECT id, status FROM src.match_run WHERE request_id = $1 AND status IN ('Pending','Pending approval') FOR UPDATE`, [req.id]);
-            for (const run of stale.rows) {
-                await tx.query(`UPDATE src.match_run SET status = 'Superseded', version = version + 1, updated_at = now() WHERE id = $1`, [run.id]);
+            const stale = await tx.orm
+                .select({ id: schema_1.matchRun.id, status: schema_1.matchRun.status })
+                .from(schema_1.matchRun)
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.matchRun.requestId, req.id), (0, drizzle_orm_1.inArray)(schema_1.matchRun.status, ['Pending', 'Pending approval'])))
+                .for('update');
+            for (const run of stale) {
+                await tx.orm
+                    .update(schema_1.matchRun)
+                    .set({ status: 'Superseded', version: (0, drizzle_orm_1.sql) `${schema_1.matchRun.version} + 1`, updatedAt: (0, drizzle_orm_1.sql) `now()` })
+                    .where((0, drizzle_orm_1.eq)(schema_1.matchRun.id, run.id));
                 await this.history.record(tx, {
                     entityType: 'MATCH_RUN', entityId: run.id, from: run.status, to: 'Superseded', actorUserId: null, actorRole: 'SYSTEM',
                     source: 'SYSTEM', contextRequestId: req.id, reasonCode: 'REQUEST_CHANGED', correlationId,
                 });
-                await tx.query(`UPDATE crd.case_task SET status = 'Cancelled', version = version + 1, updated_at = now()
-            WHERE dedupe_key = $1 AND status IN ('Open','In progress')`, [`batch:${run.id}`]);
+                await (0, case_workflow_public_1.cancelBatchReviewTask)(tx, run.id);
             }
-            if (open.rows.length > 0) {
+            if (open.length > 0) {
                 await this.outbox.append(tx, {
                     aggregateType: 'BLOOD_REQUEST', aggregateId: req.id, eventType: 'InvitationsCancelled',
-                    payload: { invitationIds: open.rows.map((r) => r.id), reason: 'REQUEST_CHANGED' },
+                    payload: { invitationIds: open.map((r) => r.id), reason: 'REQUEST_CHANGED' },
                     version: req.version,
                 });
             }
@@ -190,22 +210,22 @@ let MatchingService = class MatchingService {
             if (req.status === 'Searching' && !req.outreach_paused && !req.has_moderation_hold && req.has_location) {
                 waveId = await this.createWave(tx, req, 'MANUAL', null);
             }
-            return { cancelled: open.rows.length, waveId };
+            return { cancelled: open.length, waveId };
         });
     }
     async listWaves(principal, requestId) {
         const req = await this.lockRequest(this.db, requestId, false);
         await this.requireStaffAccess(this.db, principal, req, 'blood_request.view');
-        const { rows } = await this.db.query('SELECT id FROM src.match_run WHERE request_id = $1 ORDER BY wave_no', [requestId]);
+        const rows = await this.db.orm.select({ id: schema_1.matchRun.id }).from(schema_1.matchRun).where((0, drizzle_orm_1.eq)(schema_1.matchRun.requestId, requestId)).orderBy((0, drizzle_orm_1.asc)(schema_1.matchRun.waveNo));
         return Promise.all(rows.map((r) => this.waveView(this.db, r.id)));
     }
     async approveWave(principal, waveId, input) {
         return this.db.transaction(async (tx) => {
             const run = await this.lockRun(tx, waveId);
-            const req = await this.lockRequest(tx, run.request_id);
+            const req = await this.lockRequest(tx, run.requestId);
             await this.requireStaffAccess(tx, principal, req);
             if (run.status !== 'Pending approval') {
-                if (run.approved_by === principal.userId)
+                if (run.approvedBy === principal.userId)
                     return this.waveView(tx, waveId);
                 throw fail('WAVE_NOT_AWAITING_APPROVAL', common_1.HttpStatus.CONFLICT);
             }
@@ -214,33 +234,47 @@ let MatchingService = class MatchingService {
             if (req.status !== 'Searching')
                 throw fail('REQUEST_NOT_SEARCHING');
             const settings = await this.loadSettings(tx);
-            if (run.wave_no > settings.maxWaves && !input.note?.trim())
+            if (run.waveNo > settings.maxWaves && !input.note?.trim())
                 throw fail('REVIEW_NOTE_REQUIRED');
             const remove = input.removeCandidateIds ?? [];
             if (remove.length > 0) {
-                const removed = await tx.query(`UPDATE src.match_candidate SET selected_for_invite = false WHERE match_run_id = $1 AND id = ANY($2::uuid[]) AND selected_for_invite`, [waveId, remove]);
-                if (removed.rowCount !== new Set(remove).size)
+                const removed = await tx.orm
+                    .update(schema_1.matchCandidate)
+                    .set({ selectedForInvite: false })
+                    .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.matchCandidate.matchRunId, waveId), (0, drizzle_orm_1.inArray)(schema_1.matchCandidate.id, remove), (0, drizzle_orm_1.eq)(schema_1.matchCandidate.selectedForInvite, true)))
+                    .returning({ id: schema_1.matchCandidate.id });
+                if (removed.length !== new Set(remove).size)
                     throw fail('CANDIDATE_NOT_IN_BATCH');
             }
-            const selected = await tx.query(`SELECT id, donor_profile_id, deferred_until FROM src.match_candidate WHERE match_run_id = $1 AND selected_for_invite ORDER BY rank`, [waveId]);
-            if (selected.rows.length === 0)
+            const selected = await tx.orm
+                .select({ id: schema_1.matchCandidate.id, donorProfileId: schema_1.matchCandidate.donorProfileId, deferredUntil: schema_1.matchCandidate.deferredUntil })
+                .from(schema_1.matchCandidate)
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.matchCandidate.matchRunId, waveId), (0, drizzle_orm_1.eq)(schema_1.matchCandidate.selectedForInvite, true)))
+                .orderBy((0, drizzle_orm_1.asc)(schema_1.matchCandidate.rank));
+            if (selected.length === 0)
                 throw fail('NO_CANDIDATES_SELECTED');
             const windowMin = (0, matching_rules_1.responseWindowMinutes)(req.urgency);
             const payload = {
                 requestReference: req.reference_no, hospitalAreaId: req.area_id, bloodGroup: req.requested_blood_group,
                 component: req.component, urgency: req.urgency, requiredBy: req.required_by,
             };
-            for (const c of selected.rows) {
-                await tx.query(`INSERT INTO src.invitation (request_id, donor_profile_id, match_run_id, match_candidate_id, status, queued_at, expires_at, payload_snapshot)
-           VALUES ($1, $2, $3, $4, 'Queued', COALESCE($5, now()), COALESCE($5, now()) + make_interval(mins => $6), $7::jsonb)`, [req.id, c.donor_profile_id, waveId, c.id, c.deferred_until, windowMin, JSON.stringify(payload)]);
-            }
-            await tx.query(`UPDATE src.match_run SET status = 'Dispatching', approved_by = $2, response_window_ends_at = now() + make_interval(mins => $3),
-                version = version + 1, updated_at = now() WHERE id = $1`, [waveId, principal.userId, windowMin]);
-            await tx.query(`UPDATE crd.case_task SET status = 'Done', completed_by = $2, completed_at = now(), version = version + 1, updated_at = now()
-          WHERE request_id = $1 AND task_type = 'TK_REVIEW_BATCH' AND status <> 'Done'`, [req.id, principal.userId]);
+            await tx.orm.insert(schema_1.invitation).values(selected.map((c) => ({
+                requestId: req.id, donorProfileId: c.donorProfileId, matchRunId: waveId, matchCandidateId: c.id, status: 'Queued',
+                queuedAt: c.deferredUntil ?? (0, drizzle_orm_1.sql) `now()`,
+                expiresAt: c.deferredUntil ? new Date(c.deferredUntil.getTime() + windowMin * 60_000) : (0, drizzle_orm_1.sql) `now() + make_interval(mins => ${windowMin}::int)`,
+                payloadSnapshot: payload,
+            })));
+            await tx.orm
+                .update(schema_1.matchRun)
+                .set({
+                status: 'Dispatching', approvedBy: principal.userId, responseWindowEndsAt: (0, drizzle_orm_1.sql) `now() + make_interval(mins => ${windowMin}::int)`,
+                version: (0, drizzle_orm_1.sql) `${schema_1.matchRun.version} + 1`, updatedAt: (0, drizzle_orm_1.sql) `now()`,
+            })
+                .where((0, drizzle_orm_1.eq)(schema_1.matchRun.id, waveId));
+            await (0, case_workflow_public_1.completeBatchReviewTasks)(tx, req.id, principal.userId);
             await this.outbox.append(tx, {
                 aggregateType: 'MATCH_RUN', aggregateId: waveId, eventType: 'WaveApproved',
-                payload: { requestId: req.id, invitations: selected.rows.length },
+                payload: { requestId: req.id, invitations: selected.length },
             });
             return this.waveView(tx, waveId);
         });
@@ -252,12 +286,16 @@ let MatchingService = class MatchingService {
             throw fail('OUTREACH_PAUSED');
         if (!req.has_location)
             throw fail('REQUEST_HAS_NO_LOCATION');
-        const pending = await tx.query("SELECT 1 FROM src.match_run WHERE request_id = $1 AND status IN ('Pending','Pending approval')", [req.id]);
-        if (pending.rows[0])
+        const [pending] = await tx.orm
+            .select({ id: schema_1.matchRun.id })
+            .from(schema_1.matchRun)
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.matchRun.requestId, req.id), (0, drizzle_orm_1.inArray)(schema_1.matchRun.status, ['Pending', 'Pending approval'])))
+            .limit(1);
+        if (pending)
             throw fail('WAVE_AWAITING_APPROVAL', common_1.HttpStatus.CONFLICT);
         const settings = await this.loadSettings(tx);
-        const last = await tx.query('SELECT COALESCE(max(wave_no), 0)::int AS n FROM src.match_run WHERE request_id = $1', [req.id]);
-        const waveNo = last.rows[0].n + 1;
+        const [last] = await tx.orm.select({ n: (0, drizzle_orm_1.max)(schema_1.matchRun.waveNo) }).from(schema_1.matchRun).where((0, drizzle_orm_1.eq)(schema_1.matchRun.requestId, req.id));
+        const waveNo = (last?.n ?? 0) + 1;
         const params = {
             urgency: req.urgency,
             radiusKm: (0, matching_rules_1.radiusSteps)(settings.radiusStepsKm, waveNo),
@@ -268,48 +306,46 @@ let MatchingService = class MatchingService {
             criticalBypassContactHours: settings.criticalBypassContactHours,
             now: new Date(),
         };
-        const rule = await tx.query(`SELECT max(rule_set_version) AS v FROM src.outreach_group_rule WHERE status = 'Approved'`);
+        const [rule] = await tx.orm.select({ v: (0, drizzle_orm_1.max)(schema_1.outreachGroupRule.ruleSetVersion) }).from(schema_1.outreachGroupRule).where((0, drizzle_orm_1.eq)(schema_1.outreachGroupRule.status, 'Approved'));
         const facts = await this.loadFacts(tx, req);
         const scored = facts.map((f) => ({ facts: f, result: (0, matching_rules_1.evaluateDonor)(f, params) }));
         const included = scored.filter((s) => s.result.included).sort(matching_rules_1.compareCandidates);
         const proposed = new Set(included.slice(0, params.waveSize).map((s) => s.facts.donorProfileId));
-        await tx.query(`UPDATE src.match_run SET status = 'Completed', version = version + 1, updated_at = now()
-        WHERE request_id = $1 AND status IN ('Awaiting responses', 'Dispatching', 'Approved')`, [req.id]);
-        const run = await tx.query(`INSERT INTO src.match_run (request_id, wave_no, status, trigger, mode, radius_km, wave_size, filters_version, group_rule_version,
-                                  params_snapshot, candidates_evaluated, candidates_included)
-       VALUES ($1, $2, 'Pending approval', $3::match_run_trigger, 'PHASE1_CONTROLLED', $4, $5, 1, $6, $7::jsonb, $8, $9) RETURNING id`, [req.id, waveNo, trigger, params.radiusKm, params.waveSize, rule.rows[0].v ?? 0, JSON.stringify({ ...params, now: params.now.toISOString() }), scored.length, included.length]);
-        const runId = run.rows[0].id;
-        let rank = 0;
-        for (const s of included) {
-            const isProposed = proposed.has(s.facts.donorProfileId);
-            await tx.query(`INSERT INTO src.match_candidate (match_run_id, donor_profile_id, included, rank, distance_km_approx, reason_codes, deferred_until, selected_for_invite)
-         VALUES ($1, $2, true, $3, $4, $5::match_reason_code[], $6, $7)`, [runId, s.facts.donorProfileId, ++rank, s.facts.distanceKm, ['RK_DISTANCE_BAND', ...s.result.reasons], s.result.deferredUntil, isProposed]);
-        }
-        for (const s of scored.filter((x) => !x.result.included)) {
-            await tx.query(`INSERT INTO src.match_candidate (match_run_id, donor_profile_id, included, distance_km_approx, reason_codes)
-         VALUES ($1, $2, false, $3, $4::match_reason_code[])`, [runId, s.facts.donorProfileId, s.facts.distanceKm, s.result.reasons]);
-        }
-        await tx.query(`INSERT INTO crd.case_task (request_id, task_type, status, assignee_user_id, dedupe_key)
-       VALUES ($1, 'TK_REVIEW_BATCH', 'Open', $2, $3) ON CONFLICT DO NOTHING`, [req.id, req.assigned_support_user_id, `batch:${runId}`]);
+        await tx.orm
+            .update(schema_1.matchRun)
+            .set({ status: 'Completed', version: (0, drizzle_orm_1.sql) `${schema_1.matchRun.version} + 1`, updatedAt: (0, drizzle_orm_1.sql) `now()` })
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.matchRun.requestId, req.id), (0, drizzle_orm_1.inArray)(schema_1.matchRun.status, ['Awaiting responses', 'Dispatching', 'Approved'])));
+        const [run] = await tx.orm
+            .insert(schema_1.matchRun)
+            .values({
+            requestId: req.id, waveNo, status: 'Pending approval', trigger, mode: 'PHASE1_CONTROLLED', radiusKm: String(params.radiusKm), waveSize: params.waveSize,
+            filtersVersion: 1, groupRuleVersion: rule?.v ?? 0, paramsSnapshot: { ...params, now: params.now.toISOString() },
+            candidatesEvaluated: scored.length, candidatesIncluded: included.length,
+        })
+            .returning({ id: schema_1.matchRun.id });
+        const distance = (km) => (km === null ? null : String(km));
+        const candidates = [
+            ...included.map((s, i) => ({
+                matchRunId: run.id, donorProfileId: s.facts.donorProfileId, included: true, rank: i + 1, distanceKmApprox: distance(s.facts.distanceKm),
+                reasonCodes: ['RK_DISTANCE_BAND', ...s.result.reasons], deferredUntil: s.result.deferredUntil, selectedForInvite: proposed.has(s.facts.donorProfileId),
+            })),
+            ...scored.filter((x) => !x.result.included).map((s) => ({
+                matchRunId: run.id, donorProfileId: s.facts.donorProfileId, included: false, distanceKmApprox: distance(s.facts.distanceKm), reasonCodes: s.result.reasons,
+            })),
+        ];
+        if (candidates.length > 0)
+            await tx.orm.insert(schema_1.matchCandidate).values(candidates);
+        await (0, case_workflow_public_1.openBatchReviewTask)(tx, req.id, run.id, req.assigned_support_user_id);
         if (req.status === 'Verified')
-            await this.startSearching(tx, req, actor);
+            await (0, request_public_1.markSearching)(tx, this.history, req.id, actor);
         await this.outbox.append(tx, {
-            aggregateType: 'MATCH_RUN', aggregateId: runId, eventType: 'WaveProposed',
+            aggregateType: 'MATCH_RUN', aggregateId: run.id, eventType: 'WaveProposed',
             payload: { requestId: req.id, waveNo, included: included.length, evaluated: scored.length },
         });
-        return runId;
-    }
-    async startSearching(tx, req, actor) {
-        const t = (0, request_public_1.findTransition)('Verified', 'start_search');
-        if (!t)
-            throw fail('INVALID_TRANSITION');
-        await tx.query(`UPDATE req.blood_request SET status = 'Searching', version = version + 1, updated_at = now() WHERE id = $1`, [req.id]);
-        await this.history.record(tx, {
-            entityType: 'BLOOD_REQUEST', entityId: req.id, from: 'Verified', to: 'Searching', actorUserId: actor,
-            actorRole: actor ? 'SUP' : 'SYSTEM', source: actor ? 'USER' : 'SYSTEM', contextRequestId: req.id, correlationId: (0, node_crypto_1.randomUUID)(),
-        }, request_public_1.requestStateMachine);
+        return run.id;
     }
     async loadFacts(tx, req) {
+        // Raw SQL: PostGIS distance and cross-module donor facts (ADR-16 rule 6).
         const { rows } = await tx.query(`WITH loc AS (
          SELECT COALESCE(r.location, f.location, a.centroid) AS point
            FROM req.blood_request r
@@ -373,33 +409,42 @@ let MatchingService = class MatchingService {
         }));
     }
     async waveView(db, waveId) {
-        const run = await db.query('SELECT * FROM src.match_run WHERE id = $1', [waveId]);
-        const r = run.rows[0];
+        const [r] = await db.orm.select().from(schema_1.matchRun).where((0, drizzle_orm_1.eq)(schema_1.matchRun.id, waveId));
         if (!r)
             throw new common_1.NotFoundException({ code: 'WAVE_NOT_FOUND' });
-        const cands = await db.query(`SELECT c.id, d.donor_code, d.blood_group, c.included, c.rank, c.distance_km_approx, c.reason_codes::text[] AS reason_codes, c.deferred_until, c.selected_for_invite
-         FROM src.match_candidate c JOIN idn.donor_profile d ON d.id = c.donor_profile_id
-        WHERE c.match_run_id = $1 ORDER BY c.included DESC, c.rank NULLS LAST, d.donor_code`, [waveId]);
+        const cands = await db.orm
+            .select({
+            id: schema_1.matchCandidate.id, donorProfileId: schema_1.matchCandidate.donorProfileId, included: schema_1.matchCandidate.included, rank: schema_1.matchCandidate.rank,
+            distanceKmApprox: schema_1.matchCandidate.distanceKmApprox, reasonCodes: schema_1.matchCandidate.reasonCodes, deferredUntil: schema_1.matchCandidate.deferredUntil,
+            selectedForInvite: schema_1.matchCandidate.selectedForInvite,
+        })
+            .from(schema_1.matchCandidate)
+            .where((0, drizzle_orm_1.eq)(schema_1.matchCandidate.matchRunId, waveId));
+        const labels = await (0, read_model_public_2.donorLabels)(db, cands.map((c) => c.donorProfileId));
+        const rows = cands
+            .map((c) => ({ ...c, donorCode: labels.get(c.donorProfileId)?.donorCode ?? '', bloodGroup: labels.get(c.donorProfileId)?.bloodGroup ?? null }))
+            .sort((a, b) => Number(b.included) - Number(a.included) || (a.rank ?? Infinity) - (b.rank ?? Infinity) || (a.donorCode < b.donorCode ? -1 : a.donorCode > b.donorCode ? 1 : 0));
         return {
-            id: r.id, requestId: r.request_id, waveNo: r.wave_no, status: r.status, trigger: r.trigger, radiusKm: Number(r.radius_km),
-            waveSize: r.wave_size, evaluated: r.candidates_evaluated, included: r.candidates_included,
-            responseWindowEndsAt: r.response_window_ends_at, createdAt: r.created_at,
+            id: r.id, requestId: r.requestId, waveNo: r.waveNo, status: r.status, trigger: r.trigger, radiusKm: Number(r.radiusKm),
+            waveSize: r.waveSize, evaluated: r.candidatesEvaluated, included: r.candidatesIncluded,
+            responseWindowEndsAt: r.responseWindowEndsAt, createdAt: r.createdAt,
             notice: 'This is an outreach recommendation, not a compatibility decision.',
-            candidates: cands.rows.map((c) => ({
-                id: c.id, donorCode: c.donor_code, bloodGroup: c.blood_group, included: c.included, rank: c.rank,
-                distanceKmApprox: c.distance_km_approx === null ? null : Math.round(Number(c.distance_km_approx) * 10) / 10,
-                reasons: c.reason_codes.map((code) => ({ code, label: matching_rules_1.REASON_LABELS[code] ?? code })),
-                deferredUntil: c.deferred_until, selected: c.selected_for_invite,
+            candidates: rows.map((c) => ({
+                id: c.id, donorCode: c.donorCode, bloodGroup: c.bloodGroup, included: c.included, rank: c.rank,
+                distanceKmApprox: c.distanceKmApprox === null ? null : Math.round(Number(c.distanceKmApprox) * 10) / 10,
+                reasons: c.reasonCodes.map((code) => ({ code, label: matching_rules_1.REASON_LABELS[code] ?? code })),
+                deferredUntil: c.deferredUntil, selected: c.selectedForInvite,
             })),
         };
     }
     async lockRun(tx, id) {
-        const { rows } = await tx.query('SELECT * FROM src.match_run WHERE id = $1 FOR UPDATE', [id]);
-        if (!rows[0])
+        const [row] = await tx.orm.select().from(schema_1.matchRun).where((0, drizzle_orm_1.eq)(schema_1.matchRun.id, id)).for('update');
+        if (!row)
             throw new common_1.NotFoundException({ code: 'WAVE_NOT_FOUND' });
-        return rows[0];
+        return row;
     }
     async lockRequest(db, id, lock = true) {
+        // Raw SQL: locks the request row while reading facility and area location (ADR-16 rule 6).
         const { rows } = await db.query(`SELECT r.id, r.reference_no, r.status, r.urgency, r.requested_blood_group, r.component, r.required_by, r.area_id, r.outreach_paused,
               r.has_moderation_hold, r.assigned_support_user_id, r.created_by_user_id, r.version,
               (r.location IS NOT NULL OR f.location IS NOT NULL OR a.centroid IS NOT NULL) AS has_location

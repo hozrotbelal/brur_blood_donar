@@ -1,4 +1,6 @@
 import { HttpException, HttpStatus, Injectable, NotFoundException } from '@nestjs/common';
+import { and, eq, inArray, sql } from 'drizzle-orm';
+import { PgUpdateSetSource } from 'drizzle-orm/pg-core';
 import { randomUUID } from 'node:crypto';
 import { Db } from '../../platform/db/database.service';
 import { OutboxService } from '../../platform/outbox/outbox.service';
@@ -7,22 +9,30 @@ import { staffAreaIds } from '../../platform/policy/area-scope';
 import { Principal } from '../../platform/policy/policy.types';
 import { StatusHistoryService } from '../../platform/status/status-history.service';
 import { appointmentStateMachine, caseStateMachine, CaseStatus, AppointmentStatus } from './case-status';
+import { appointment, caseTask, coordinationCase } from './schema';
 
 export interface CaseRow {
   id: string;
-  case_no: string;
-  request_id: string;
+  caseNo: string;
+  requestId: string;
   status: CaseStatus;
-  owner_user_id: string | null;
+  ownerUserId: string | null;
   priority: string;
-  area_id: string | null;
+  areaId: string | null;
   disputed: boolean;
   version: number;
 }
 
+export type TaskType = (typeof caseTask.$inferSelect)['taskType'];
+export type AppointmentChanges = Omit<PgUpdateSetSource<typeof appointment>, 'status' | 'version' | 'updatedAt'>;
+
 export const fail = (code: string, status = HttpStatus.UNPROCESSABLE_ENTITY) => new HttpException({ code }, status);
 
-const CASE_COLUMNS = 'c.id, c.case_no, c.request_id, c.status, c.owner_user_id, c.priority, c.area_id, c.disputed, c.version';
+export const CASE_COLUMNS = {
+  id: coordinationCase.id, caseNo: coordinationCase.caseNo, requestId: coordinationCase.requestId, status: coordinationCase.status,
+  ownerUserId: coordinationCase.ownerUserId, priority: coordinationCase.priority, areaId: coordinationCase.areaId,
+  disputed: coordinationCase.disputed, version: coordinationCase.version,
+};
 
 @Injectable()
 export class CaseSupport {
@@ -33,17 +43,15 @@ export class CaseSupport {
   ) {}
 
   async loadCase(db: Db, caseId: string, lock: boolean): Promise<CaseRow> {
-    const { rows } = await db.query<CaseRow>(
-      `SELECT ${CASE_COLUMNS} FROM crd.coordination_case c WHERE c.id = $1 ${lock ? 'FOR UPDATE OF c' : ''}`,
-      [caseId],
-    );
-    if (!rows[0]) throw new NotFoundException({ code: 'CASE_NOT_FOUND' });
-    return rows[0];
+    const query = db.orm.select(CASE_COLUMNS).from(coordinationCase).where(eq(coordinationCase.id, caseId));
+    const [row] = lock ? await query.for('update') : await query;
+    if (!row) throw new NotFoundException({ code: 'CASE_NOT_FOUND' });
+    return row as CaseRow;
   }
 
   async requireAccess(db: Db, principal: Principal, row: CaseRow, key: string): Promise<void> {
     const decision = this.policy.decide(principal, key, {
-      resource: { assignedUserIds: row.owner_user_id ? [row.owner_user_id] : [], areaIds: row.area_id ? [row.area_id] : [] },
+      resource: { assignedUserIds: row.ownerUserId ? [row.ownerUserId] : [], areaIds: row.areaId ? [row.areaId] : [] },
       principalAreaIds: await staffAreaIds(db, principal.userId),
     });
     if (!decision.allowed) throw new NotFoundException({ code: 'CASE_NOT_FOUND' });
@@ -51,14 +59,19 @@ export class CaseSupport {
 
   async moveCase(tx: Db, row: CaseRow, to: CaseStatus, actor: { userId: string | null; role: 'DON' | 'SUP' | 'SYSTEM' }, reason?: string): Promise<CaseRow> {
     if (row.status === to) return row;
-    const extra =
-      to === 'Resolved' ? ', resolved_at = now()' : to === 'Closed' ? ', closed_at = now()' : to === 'Open' && row.status === 'Needs replacement' ? '' : '';
-    await tx.query(`UPDATE crd.coordination_case SET status = $2${extra}, version = version + 1, updated_at = now() WHERE id = $1`, [row.id, to]);
+    await tx.orm
+      .update(coordinationCase)
+      .set({
+        status: to,
+        ...(to === 'Resolved' ? { resolvedAt: sql`now()` } : to === 'Closed' ? { closedAt: sql`now()` } : {}),
+        version: sql`${coordinationCase.version} + 1`, updatedAt: sql`now()`,
+      })
+      .where(eq(coordinationCase.id, row.id));
     await this.history.record(
       tx,
       {
         entityType: 'COORDINATION_CASE', entityId: row.id, from: row.status, to, actorUserId: actor.userId, actorRole: actor.role,
-        source: actor.role === 'SYSTEM' ? 'SYSTEM' : 'USER', contextRequestId: row.request_id, reason, correlationId: randomUUID(),
+        source: actor.role === 'SYSTEM' ? 'SYSTEM' : 'USER', contextRequestId: row.requestId, reason, correlationId: randomUUID(),
       },
       caseStateMachine,
     );
@@ -67,31 +80,34 @@ export class CaseSupport {
 
   async moveAppointment(
     tx: Db, id: string, requestId: string, from: AppointmentStatus, to: AppointmentStatus,
-    actor: { userId: string | null; role: 'DON' | 'SUP' | 'SYSTEM' }, set = '',
+    actor: { userId: string | null; role: 'DON' | 'SUP' | 'SYSTEM' }, changes: AppointmentChanges = {},
   ) {
     appointmentStateMachine.assert(from, to);
-    await tx.query(`UPDATE crd.appointment SET status = $2${set}, version = version + 1, updated_at = now() WHERE id = $1`, [id, to]);
+    await tx.orm
+      .update(appointment)
+      .set({ status: to, ...changes, version: sql`${appointment.version} + 1`, updatedAt: sql`now()` })
+      .where(eq(appointment.id, id));
     await this.history.record(tx, {
       entityType: 'APPOINTMENT', entityId: id, from, to, actorUserId: actor.userId, actorRole: actor.role,
       source: actor.role === 'SYSTEM' ? 'SYSTEM' : 'USER', contextRequestId: requestId, correlationId: randomUUID(),
     });
   }
 
-  async openTask(tx: Db, caseRow: Pick<CaseRow, 'id' | 'request_id' | 'owner_user_id'>, type: string, dedupeKey: string, dueMinutes: number, caseDonorId?: string) {
-    await tx.query(
-      `INSERT INTO crd.case_task (case_id, request_id, case_donor_id, task_type, status, assignee_user_id, due_at, dedupe_key)
-       VALUES ($1, $2, $3, $4::case_task_type, 'Open', $5, now() + make_interval(mins => $6), $7)
-       ON CONFLICT DO NOTHING`,
-      [caseRow.id, caseRow.request_id, caseDonorId ?? null, type, caseRow.owner_user_id, dueMinutes, dedupeKey],
-    );
+  async openTask(tx: Db, caseRow: Pick<CaseRow, 'id' | 'requestId' | 'ownerUserId'>, type: TaskType, dedupeKey: string, dueMinutes: number, caseDonorId?: string) {
+    await tx.orm
+      .insert(caseTask)
+      .values({
+        caseId: caseRow.id, requestId: caseRow.requestId, caseDonorId: caseDonorId ?? null, taskType: type, status: 'Open',
+        assigneeUserId: caseRow.ownerUserId, dueAt: sql`now() + make_interval(mins => ${dueMinutes}::int)`, dedupeKey,
+      })
+      .onConflictDoNothing();
   }
 
-  async finishTask(tx: Db, caseId: string, type: string, userId: string | null, status: 'Done' | 'Cancelled' = 'Done') {
-    await tx.query(
-      `UPDATE crd.case_task SET status = $4::task_status, completed_by = $3, completed_at = now(), version = version + 1, updated_at = now()
-        WHERE case_id = $1 AND task_type = $2::case_task_type AND status IN ('Open','In progress')`,
-      [caseId, type, userId, status],
-    );
+  async finishTask(tx: Db, caseId: string, type: TaskType, userId: string | null, status: 'Done' | 'Cancelled' = 'Done') {
+    await tx.orm
+      .update(caseTask)
+      .set({ status, completedBy: userId, completedAt: sql`now()`, version: sql`${caseTask.version} + 1`, updatedAt: sql`now()` })
+      .where(and(eq(caseTask.caseId, caseId), eq(caseTask.taskType, type), inArray(caseTask.status, ['Open', 'In progress'])));
   }
 
   event(tx: Db, aggregateType: string, aggregateId: string, eventType: string, payload: Record<string, unknown>, version?: number) {

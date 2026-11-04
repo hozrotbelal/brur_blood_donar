@@ -564,6 +564,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/staff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["StaffController_staffList"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/staff/{userId}/assignment": {
         parameters: {
             query?: never;
@@ -574,6 +590,86 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["StaffController_assign"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/staff/{userId}/deactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["StaffController_deactivate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/staff/{userId}/reset-device": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["StaffController_resetDevice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/permission-sets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["StaffController_permissionSets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/access-review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["StaffController_accessReview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/access-review/grants/{grantId}/decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["StaffController_decide"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1755,10 +1851,107 @@ export interface components {
             /** Format: date-time */
             acceptedAt: string | null;
         };
+        StaffMemberDto: {
+            userId: string;
+            displayName: string | null;
+            /** @description Last four digits of the phone number */
+            phoneLast4: string;
+            /** @enum {string|null} */
+            roleCode: "SUP" | "MOD" | "ADM" | null;
+            tierCode: string | null;
+            areaIds: string[];
+            /** @enum {string} */
+            status: "Active" | "Deactivated" | "Locked" | "Suspended";
+            /** Format: date-time */
+            lastLoginAt: string | null;
+        };
         ChangeAssignmentDto: {
             tierCode: string;
             areaIds?: string[];
             reason: string;
+        };
+        AssignmentChangedDto: {
+            userId: string;
+            tierCode: string;
+            areaIds: string[];
+        };
+        StaffReasonDto: {
+            reason: string;
+        };
+        OpenCaseRefDto: {
+            id: string;
+            caseNo: string;
+            requestId: string;
+        };
+        StaffDeactivatedDto: {
+            userId: string;
+            /** @enum {string} */
+            status: "Deactivated";
+            /** @description Open cases the person owned; reassign them */
+            openCases: components["schemas"]["OpenCaseRefDto"][];
+        };
+        DeviceResetDto: {
+            userId: string;
+            devicesRevoked: number;
+        };
+        PermissionItemDto: {
+            key: string;
+            /** @enum {string} */
+            scope: "Own" | "Assigned" | "Area" | "All";
+            descriptionEn: string;
+            descriptionBn: string;
+            sensitive: boolean;
+            requiresStepUp: boolean;
+        };
+        PermissionSetViewDto: {
+            code: string;
+            nameEn: string;
+            nameBn: string;
+            /** @enum {string} */
+            roleCode: "DON" | "PAT" | "SUP" | "MOD" | "ADM";
+            /** @enum {string} */
+            kind: "BASE" | "TIER" | "SCOPE" | "CUSTOM";
+            tierRank: number | null;
+            items: components["schemas"]["PermissionItemDto"][];
+        };
+        AccessReviewGrantDto: {
+            grantId: string;
+            setCode: string;
+            setNameEn: string;
+            setNameBn: string;
+            /** @enum {string} */
+            kind: "SCOPE" | "CUSTOM";
+            /** Format: date-time */
+            expiresAt: string | null;
+            sensitiveKeys: string[];
+            /** @enum {string|null} */
+            decision: "KEEP" | "REVOKE" | null;
+            /** Format: date-time */
+            decidedAt: string | null;
+        };
+        AccessReviewMemberDto: {
+            userId: string;
+            displayName: string | null;
+            roleCode: string | null;
+            tierCode: string | null;
+            reveals: number;
+            searches: number;
+            grants: components["schemas"]["AccessReviewGrantDto"][];
+        };
+        AccessReviewDto: {
+            /** @example 2026-11 */
+            month: string;
+            members: components["schemas"]["AccessReviewMemberDto"][];
+        };
+        GrantDecisionDto: {
+            /** @enum {string} */
+            decision: "KEEP" | "REVOKE";
+            reason: string;
+        };
+        GrantDecisionResultDto: {
+            grantId: string;
+            /** @enum {string} */
+            decision: "KEEP" | "REVOKE";
         };
         AcceptStaffInvitationDto: {
             token: string;
@@ -2051,10 +2244,90 @@ export interface components {
             openedAt: string;
             overdue: boolean;
         };
+        CaseDonorDto: {
+            id: string;
+            donorCode: string | null;
+            status: string;
+            /** Format: date-time */
+            joinedAt: string | null;
+        };
+        CaseAppointmentDto: {
+            id: string;
+            caseDonorId: string;
+            facilityId: string;
+            facility: string | null;
+            /** Format: date-time */
+            scheduledStart: string;
+            status: string;
+            previousAppointmentId: string | null;
+        };
+        CaseTaskDto: {
+            id: string;
+            taskType: string;
+            status: string;
+            /** Format: date-time */
+            dueAt: string | null;
+            assigneeUserId: string | null;
+        };
+        CaseNoteViewDto: {
+            id: string;
+            noteType: string;
+            body: string;
+            authorUserId: string;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        CaseContactDto: {
+            id: string;
+            targetParty: string;
+            channel: string;
+            result: string;
+            attemptedBy: string;
+            /** Format: date-time */
+            attemptedAt: string;
+        };
+        CaseOutcomeDto: {
+            id: string;
+            outcomeType: string;
+            sourceType: string;
+            /** @enum {string} */
+            confidence: "Self-reported" | "Service-confirmed";
+            units: number | null;
+            reportedByName: string | null;
+            reportedByRole: string | null;
+            channel: string;
+            /** Format: date-time */
+            reportedAt: string;
+            disputed: boolean;
+            supersedesId: string | null;
+        };
+        CaseDetailDto: {
+            id: string;
+            caseNo: string;
+            requestId: string;
+            requestReference: string | null;
+            status: string;
+            priority: string;
+            ownerUserId: string | null;
+            disputed: boolean;
+            donors: components["schemas"]["CaseDonorDto"][];
+            appointments: components["schemas"]["CaseAppointmentDto"][];
+            tasks: components["schemas"]["CaseTaskDto"][];
+            notes: components["schemas"]["CaseNoteViewDto"][];
+            contacts: components["schemas"]["CaseContactDto"][];
+            outcomes: components["schemas"]["CaseOutcomeDto"][];
+        };
+        CaseStateDto: {
+            id: string;
+            status: string;
+        };
         NoteDto: {
             body: string;
             /** @enum {string} */
             noteType?: "GENERAL" | "HANDOVER" | "ESCALATION" | "EXTERNAL_CONTACT";
+        };
+        CreatedIdDto: {
+            id: string;
         };
         ContactAttemptDto: {
             /** @enum {string} */
@@ -2072,6 +2345,15 @@ export interface components {
             caseDonorId: string;
             facilityId: string;
             scheduledStart: string;
+        };
+        StaffAppointmentDto: {
+            id: string;
+            caseId: string;
+            status: string;
+            /** Format: date-time */
+            scheduledStart: string;
+            facilityId: string;
+            previousAppointmentId: string | null;
         };
         RescheduleDto: {
             scheduledStart: string;
@@ -2092,8 +2374,19 @@ export interface components {
             /** @description Free text without clinical detail */
             reason?: string;
         };
+        OutcomeRecordedDto: {
+            id: string;
+            /** @enum {string} */
+            confidence: "Self-reported" | "Service-confirmed";
+            caseStatus: string;
+        };
         DisputeOutcomeDto: {
             reason: string;
+        };
+        DisputeResultDto: {
+            caseId: string;
+            outcomeId: string;
+            disputed: boolean;
         };
         ResolveDisputeDto: {
             /** @enum {string} */
@@ -2102,8 +2395,24 @@ export interface components {
             /** @description Required when the resolution is CORRECTED */
             correction?: components["schemas"]["RecordOutcomeDto"];
         };
+        DisputeResolutionDto: {
+            caseId: string;
+            outcomeId: string;
+            /** @enum {string} */
+            resolution: "UPHELD" | "CORRECTED";
+            correctionId: string | null;
+            disputed: boolean;
+        };
+        FulfilmentResultDto: {
+            requestStatus: string;
+            confirmedUnits: number;
+            requestedUnits: number;
+        };
         MoreDonorsDto: {
             needed: boolean;
+        };
+        RequestStatusResultDto: {
+            requestStatus: string;
         };
         DeclareUnableDto: {
             reason: string;
@@ -2979,6 +3288,25 @@ export interface operations {
             };
         };
     };
+    StaffController_staffList: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffMemberDto"][];
+                };
+            };
+        };
+    };
     StaffController_assign: {
         parameters: {
             query?: never;
@@ -2998,7 +3326,125 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["AssignmentChangedDto"];
+                };
+            };
+        };
+    };
+    StaffController_deactivate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffReasonDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffDeactivatedDto"];
+                };
+            };
+        };
+    };
+    StaffController_resetDevice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffReasonDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceResetDto"];
+                };
+            };
+        };
+    };
+    StaffController_permissionSets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PermissionSetViewDto"][];
+                };
+            };
+        };
+    };
+    StaffController_accessReview: {
+        parameters: {
+            query?: {
+                /** @description Month in Asia/Dhaka time; defaults to the current month */
+                month?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccessReviewDto"];
+                };
+            };
+        };
+    };
+    StaffController_decide: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                grantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GrantDecisionDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GrantDecisionResultDto"];
+                };
             };
         };
     };
@@ -3746,7 +4192,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["CaseDetailDto"];
+                };
             };
         };
     };
@@ -3765,7 +4213,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["CaseStateDto"];
+                };
             };
         };
     };
@@ -3788,7 +4238,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["CreatedIdDto"];
+                };
             };
         };
     };
@@ -3811,7 +4263,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["CreatedIdDto"];
+                };
             };
         };
     };
@@ -3834,7 +4288,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["StaffAppointmentDto"];
+                };
             };
         };
     };
@@ -3857,7 +4313,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["StaffAppointmentDto"];
+                };
             };
         };
     };
@@ -3876,7 +4334,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["StaffAppointmentDto"];
+                };
             };
         };
     };
@@ -3899,7 +4359,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["OutcomeRecordedDto"];
+                };
             };
         };
     };
@@ -3923,7 +4385,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["DisputeResultDto"];
+                };
             };
         };
     };
@@ -3947,7 +4411,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["DisputeResolutionDto"];
+                };
             };
         };
     };
@@ -3966,7 +4432,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["FulfilmentResultDto"];
+                };
             };
         };
     };
@@ -3989,7 +4457,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["RequestStatusResultDto"];
+                };
             };
         };
     };
@@ -4012,7 +4482,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["RequestStatusResultDto"];
+                };
             };
         };
     };
@@ -4035,7 +4507,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["CaseStateDto"];
+                };
             };
         };
     };
@@ -4073,7 +4547,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["StaffAppointmentDto"];
+                };
             };
         };
     };
@@ -4115,7 +4591,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["StaffAppointmentDto"];
+                };
             };
         };
     };

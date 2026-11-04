@@ -14,16 +14,17 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AppointmentService = exports.ATTENDANCE_GRACE_MINUTES = void 0;
 const common_1 = require("@nestjs/common");
+const drizzle_orm_1 = require("drizzle-orm");
 const node_crypto_1 = require("node:crypto");
 const database_service_1 = require("../../platform/db/database.service");
 const status_history_service_1 = require("../../platform/status/status-history.service");
+const read_model_public_1 = require("../appointments/read-model.public");
+const read_model_public_2 = require("../identity/read-model.public");
 const request_public_1 = require("../request/request.public");
 const case_service_1 = require("./case.service");
 const case_support_1 = require("./case.support");
+const schema_1 = require("./schema");
 exports.ATTENDANCE_GRACE_MINUTES = 60;
-const SELECT = `SELECT a.id, a.case_id, a.case_donor_id, a.facility_id, a.scheduled_start, a.status, c.request_id, d.user_id AS donor_user_id
-  FROM crd.appointment a JOIN crd.coordination_case c ON c.id = a.case_id
-  JOIN crd.case_donor cd ON cd.id = a.case_donor_id JOIN idn.donor_profile d ON d.id = cd.donor_profile_id`;
 let AppointmentService = class AppointmentService {
     db;
     support;
@@ -45,8 +46,12 @@ let AppointmentService = class AppointmentService {
             if (!['Open', 'Scheduling', 'Scheduled'].includes(row.status))
                 throw (0, case_support_1.fail)('INVALID_TRANSITION');
             await this.requireDonorAndFacility(tx, caseId, dto.caseDonorId, dto.facilityId);
-            const live = await tx.query('SELECT 1 FROM crd.appointment WHERE case_donor_id = $1 AND status IN (\'Proposed\',\'Confirmed\')', [dto.caseDonorId]);
-            if (live.rows[0])
+            const [live] = await tx.orm
+                .select({ id: schema_1.appointment.id })
+                .from(schema_1.appointment)
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.appointment.caseDonorId, dto.caseDonorId), (0, drizzle_orm_1.inArray)(schema_1.appointment.status, ['Proposed', 'Confirmed'])))
+                .limit(1);
+            if (live)
                 throw (0, case_support_1.fail)('APPOINTMENT_EXISTS', common_1.HttpStatus.CONFLICT);
             const id = await this.insertProposed(tx, row, dto.caseDonorId, dto.facilityId, start, null, principal.userId);
             if (row.status === 'Open')
@@ -60,14 +65,14 @@ let AppointmentService = class AppointmentService {
             throw (0, case_support_1.fail)('APPOINTMENT_IN_PAST');
         return this.db.transaction(async (tx) => {
             const appt = await this.lock(tx, appointmentId);
-            const row = await this.support.loadCase(tx, appt.case_id, true);
+            const row = await this.support.loadCase(tx, appt.caseId, true);
             await this.support.requireAccess(tx, principal, row, 'appointment.edit');
             if (appt.status !== 'Proposed' && appt.status !== 'Confirmed')
                 throw (0, case_support_1.fail)('INVALID_TRANSITION');
-            const facilityId = dto.facilityId ?? appt.facility_id;
-            await this.requireDonorAndFacility(tx, appt.case_id, appt.case_donor_id, facilityId);
-            await this.support.moveAppointment(tx, appt.id, appt.request_id, appt.status, 'Rescheduled', { userId: principal.userId, role: 'SUP' }, ', reminders_stopped = true');
-            const id = await this.insertProposed(tx, row, appt.case_donor_id, facilityId, start, appt.id, principal.userId);
+            const facilityId = dto.facilityId ?? appt.facilityId;
+            await this.requireDonorAndFacility(tx, appt.caseId, appt.caseDonorId, facilityId);
+            await this.support.moveAppointment(tx, appt.id, appt.requestId, appt.status, 'Rescheduled', { userId: principal.userId, role: 'SUP' }, { remindersStopped: true });
+            const id = await this.insertProposed(tx, row, appt.caseDonorId, facilityId, start, appt.id, principal.userId);
             if (row.status === 'Scheduled')
                 await this.support.moveCase(tx, row, 'Scheduling', { userId: principal.userId, role: 'SUP' }, 'Rescheduled');
             return this.view(tx, id);
@@ -78,11 +83,11 @@ let AppointmentService = class AppointmentService {
             const appt = await this.lockOwned(tx, principal, appointmentId);
             if (appt.status !== 'Proposed')
                 throw (0, case_support_1.fail)('INVALID_TRANSITION');
-            const row = await this.support.loadCase(tx, appt.case_id, true);
-            await this.support.moveAppointment(tx, appt.id, appt.request_id, 'Proposed', 'Confirmed', { userId: principal.userId, role: 'DON' }, ', confirmed_by_donor_at = now()');
+            const row = await this.support.loadCase(tx, appt.caseId, true);
+            await this.support.moveAppointment(tx, appt.id, appt.requestId, 'Proposed', 'Confirmed', { userId: principal.userId, role: 'DON' }, { confirmedByDonorAt: (0, drizzle_orm_1.sql) `now()` });
             if (row.status === 'Scheduling')
                 await this.support.moveCase(tx, row, 'Scheduled', { userId: principal.userId, role: 'DON' }, 'Appointment confirmed');
-            await this.support.event(tx, 'APPOINTMENT', appt.id, 'AppointmentConfirmed', { caseId: appt.case_id });
+            await this.support.event(tx, 'APPOINTMENT', appt.id, 'AppointmentConfirmed', { caseId: appt.caseId });
             return this.view(tx, appt.id);
         });
     }
@@ -91,25 +96,25 @@ let AppointmentService = class AppointmentService {
             const appt = await this.lockOwned(tx, principal, appointmentId);
             if (appt.status !== 'Proposed' && appt.status !== 'Confirmed')
                 throw (0, case_support_1.fail)('INVALID_TRANSITION');
-            const row = await this.support.loadCase(tx, appt.case_id, false);
-            await this.support.openTask(tx, row, 'TK_RESOLVE_TRAVEL_TIMING', `timing:${appt.id}`, 60, appt.case_donor_id);
+            const row = await this.support.loadCase(tx, appt.caseId, false);
+            await this.support.openTask(tx, row, 'TK_RESOLVE_TRAVEL_TIMING', `timing:${appt.id}`, 60, appt.caseDonorId);
             if (dto.note)
-                await tx.query(`INSERT INTO crd.case_note (case_id, author_user_id, note_type, body) VALUES ($1, $2, 'GENERAL', $3)`, [appt.case_id, principal.userId, dto.note]);
-            await this.support.event(tx, 'APPOINTMENT', appt.id, 'TimingProblemReported', { caseId: appt.case_id }, Date.now());
+                await this.cases.insertNote(tx, appt.caseId, principal.userId, 'GENERAL', dto.note);
+            await this.support.event(tx, 'APPOINTMENT', appt.id, 'TimingProblemReported', { caseId: appt.caseId }, Date.now());
             return { reported: true };
         });
     }
     async recordNoShow(principal, appointmentId) {
         return this.db.transaction(async (tx) => {
             const appt = await this.lock(tx, appointmentId);
-            const row = await this.support.loadCase(tx, appt.case_id, true);
+            const row = await this.support.loadCase(tx, appt.caseId, true);
             await this.support.requireAccess(tx, principal, row, 'appointment.edit');
             if (appt.status !== 'Confirmed')
                 throw (0, case_support_1.fail)('INVALID_TRANSITION');
-            if (Date.now() < appt.scheduled_start.getTime() + exports.ATTENDANCE_GRACE_MINUTES * 60_000)
+            if (Date.now() < appt.scheduledStart.getTime() + exports.ATTENDANCE_GRACE_MINUTES * 60_000)
                 throw (0, case_support_1.fail)('GRACE_PERIOD_NOT_OVER');
-            await this.support.moveAppointment(tx, appt.id, appt.request_id, 'Confirmed', 'No-show', { userId: principal.userId, role: 'SUP' }, ', no_show_marked_at = now(), reminders_stopped = true');
-            await this.cases.handleDonorLeft(tx, { caseDonorId: appt.case_donor_id, kind: 'NO_SHOW', actorUserId: principal.userId, actorRole: 'SUP' });
+            await this.support.moveAppointment(tx, appt.id, appt.requestId, 'Confirmed', 'No-show', { userId: principal.userId, role: 'SUP' }, { noShowMarkedAt: (0, drizzle_orm_1.sql) `now()`, remindersStopped: true });
+            await this.cases.handleDonorLeft(tx, { caseDonorId: appt.caseDonorId, kind: 'NO_SHOW', actorUserId: principal.userId, actorRole: 'SUP' });
             return this.view(tx, appt.id);
         });
     }
@@ -120,27 +125,32 @@ let AppointmentService = class AppointmentService {
                 return this.view(tx, appt.id);
             if (appt.status !== 'Confirmed' && appt.status !== 'Checked-in')
                 throw (0, case_support_1.fail)('INVALID_TRANSITION');
-            if (appt.scheduled_start.getTime() > Date.now())
+            if (appt.scheduledStart.getTime() > Date.now())
                 throw (0, case_support_1.fail)('APPOINTMENT_NOT_STARTED');
-            let row = await this.support.loadCase(tx, appt.case_id, true);
-            await this.support.moveAppointment(tx, appt.id, appt.request_id, appt.status, 'Attended (reported)', { userId: principal.userId, role: 'DON' }, ', attended_reported_at = now()');
+            let row = await this.support.loadCase(tx, appt.caseId, true);
+            await this.support.moveAppointment(tx, appt.id, appt.requestId, appt.status, 'Attended (reported)', { userId: principal.userId, role: 'DON' }, { attendedReportedAt: (0, drizzle_orm_1.sql) `now()` });
             if (row.status === 'Scheduled')
                 row = await this.support.moveCase(tx, row, 'Attendance pending', { userId: null, role: 'SYSTEM' }, 'Donation reported');
             if (row.status === 'Attendance pending')
                 await this.support.moveCase(tx, row, 'Outcome pending', { userId: principal.userId, role: 'DON' }, 'Donation reported');
-            await tx.query(`INSERT INTO crd.outcome_update (case_id, request_id, case_donor_id, appointment_id, outcome_type, source_type, confidence, reported_by_user_id,
-                                         facility_id, channel, reported_at, units_count)
-         VALUES ($1, $2, $3, $4, 'DONATION_COMPLETED', 'DONOR_SELF_REPORT', 'Self-reported', $5, $6, 'IN_APP', now(), 1)`, [appt.case_id, appt.request_id, appt.case_donor_id, appt.id, principal.userId, appt.facility_id]);
-            await this.markDonationReported(tx, appt.request_id);
-            await this.support.finishTask(tx, appt.case_id, 'TK_CONFIRM_DONOR_ATTENDANCE', null);
-            await this.support.event(tx, 'APPOINTMENT', appt.id, 'DonationReported', { caseId: appt.case_id });
+            await tx.orm.insert(schema_1.outcomeUpdate).values({
+                caseId: appt.caseId, requestId: appt.requestId, caseDonorId: appt.caseDonorId, appointmentId: appt.id, outcomeType: 'DONATION_COMPLETED',
+                sourceType: 'DONOR_SELF_REPORT', confidence: 'Self-reported', reportedByUserId: principal.userId, facilityId: appt.facilityId, channel: 'IN_APP',
+                reportedAt: (0, drizzle_orm_1.sql) `now()`, unitsCount: 1,
+            });
+            await (0, request_public_1.markDonationReported)(tx, this.history, appt.requestId, { userId: null, role: 'SYSTEM' }, 'DONATION_REPORTED');
+            await this.support.finishTask(tx, appt.caseId, 'TK_CONFIRM_DONOR_ATTENDANCE', null);
+            await this.support.event(tx, 'APPOINTMENT', appt.id, 'DonationReported', { caseId: appt.caseId });
             return this.view(tx, appt.id);
         });
     }
     async listForDonor(principal) {
-        const { rows } = await this.db.query(`${SELECT.replace('d.user_id AS donor_user_id', 'd.user_id AS donor_user_id, f.name_en AS facility_name, f.contact_phone AS facility_phone, ST_Y(f.location::geometry) AS lat, ST_X(f.location::geometry) AS lon')}
-       JOIN apt.facility f ON f.id = a.facility_id
-       WHERE d.user_id = $1 AND a.status <> 'Rescheduled' ORDER BY a.scheduled_start DESC LIMIT 50`, [principal.userId]);
+        // Raw SQL: PostGIS facility coordinates joined across identity and appointments (ADR-16 rule 6).
+        const { rows } = await this.db.query(`SELECT a.id, a.status, a.scheduled_start, a.facility_id, f.name_en AS facility_name, f.contact_phone AS facility_phone,
+              ST_Y(f.location::geometry) AS lat, ST_X(f.location::geometry) AS lon
+         FROM crd.appointment a JOIN crd.case_donor cd ON cd.id = a.case_donor_id JOIN idn.donor_profile d ON d.id = cd.donor_profile_id
+         JOIN apt.facility f ON f.id = a.facility_id
+        WHERE d.user_id = $1 AND a.status <> 'Rescheduled' ORDER BY a.scheduled_start DESC LIMIT 50`, [principal.userId]);
         return rows.map((r) => ({
             id: r.id, status: r.status, scheduledStart: r.scheduled_start,
             facility: {
@@ -149,52 +159,63 @@ let AppointmentService = class AppointmentService {
             },
         }));
     }
-    async markDonationReported(tx, requestId) {
-        const r = await tx.query('SELECT status FROM req.blood_request WHERE id = $1 FOR UPDATE', [requestId]);
-        await tx.query('UPDATE req.blood_request SET donation_reported_at = COALESCE(donation_reported_at, now()) WHERE id = $1', [requestId]);
-        if (r.rows[0]?.status !== 'Donor coordination' || !(0, request_public_1.findTransition)('Donor coordination', 'attendance_reported'))
-            return;
-        await tx.query(`UPDATE req.blood_request SET status = 'Awaiting outcome', version = version + 1, updated_at = now() WHERE id = $1`, [requestId]);
-        await this.history.record(tx, {
-            entityType: 'BLOOD_REQUEST', entityId: requestId, from: 'Donor coordination', to: 'Awaiting outcome', actorUserId: null, actorRole: 'SYSTEM',
-            source: 'SYSTEM', contextRequestId: requestId, reasonCode: 'DONATION_REPORTED', correlationId: (0, node_crypto_1.randomUUID)(),
-        }, request_public_1.requestStateMachine);
-    }
     async requireDonorAndFacility(tx, caseId, caseDonorId, facilityId) {
-        const donor = await tx.query('SELECT 1 FROM crd.case_donor WHERE id = $1 AND case_id = $2 AND status = \'Active\'', [caseDonorId, caseId]);
-        if (!donor.rows[0])
+        const [donor] = await tx.orm
+            .select({ id: schema_1.caseDonor.id })
+            .from(schema_1.caseDonor)
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.caseDonor.id, caseDonorId), (0, drizzle_orm_1.eq)(schema_1.caseDonor.caseId, caseId), (0, drizzle_orm_1.eq)(schema_1.caseDonor.status, 'Active')));
+        if (!donor)
             throw new common_1.NotFoundException({ code: 'CASE_DONOR_NOT_FOUND' });
-        const facility = await tx.query("SELECT 1 FROM apt.facility WHERE id = $1 AND status = 'Active'", [facilityId]);
-        if (!facility.rows[0])
+        if (!(await (0, read_model_public_1.isActiveFacility)(tx, facilityId)))
             throw new common_1.NotFoundException({ code: 'FACILITY_NOT_FOUND' });
     }
     async insertProposed(tx, row, caseDonorId, facilityId, start, previous, userId) {
-        const created = await tx.query(`INSERT INTO crd.appointment (case_id, case_donor_id, facility_id, scheduled_start, status, previous_appointment_id)
-       VALUES ($1, $2, $3, $4, 'Proposed', $5) RETURNING id`, [row.id, caseDonorId, facilityId, start, previous]);
-        const id = created.rows[0].id;
+        const [created] = await tx.orm
+            .insert(schema_1.appointment)
+            .values({ caseId: row.id, caseDonorId, facilityId, scheduledStart: start, status: 'Proposed', previousAppointmentId: previous })
+            .returning({ id: schema_1.appointment.id });
         await this.history.record(tx, {
-            entityType: 'APPOINTMENT', entityId: id, from: null, to: 'Proposed', actorUserId: userId, actorRole: 'SUP', source: 'USER',
-            contextRequestId: row.request_id, correlationId: (0, node_crypto_1.randomUUID)(),
+            entityType: 'APPOINTMENT', entityId: created.id, from: null, to: 'Proposed', actorUserId: userId, actorRole: 'SUP', source: 'USER',
+            contextRequestId: row.requestId, correlationId: (0, node_crypto_1.randomUUID)(),
         });
-        await this.support.event(tx, 'APPOINTMENT', id, 'AppointmentProposed', { caseId: row.id });
-        return id;
+        await this.support.event(tx, 'APPOINTMENT', created.id, 'AppointmentProposed', { caseId: row.id });
+        return created.id;
     }
     async lock(tx, id) {
-        const { rows } = await tx.query(`${SELECT} WHERE a.id = $1 FOR UPDATE OF a`, [id]);
-        if (!rows[0])
+        const [appt] = await tx.orm
+            .select({
+            id: schema_1.appointment.id, caseId: schema_1.appointment.caseId, caseDonorId: schema_1.appointment.caseDonorId, facilityId: schema_1.appointment.facilityId,
+            scheduledStart: schema_1.appointment.scheduledStart, status: schema_1.appointment.status,
+        })
+            .from(schema_1.appointment)
+            .where((0, drizzle_orm_1.eq)(schema_1.appointment.id, id))
+            .for('update');
+        if (!appt)
             throw new common_1.NotFoundException({ code: 'APPOINTMENT_NOT_FOUND' });
-        return rows[0];
+        const [owner] = await tx.orm
+            .select({ requestId: schema_1.coordinationCase.requestId, donorProfileId: schema_1.caseDonor.donorProfileId })
+            .from(schema_1.caseDonor)
+            .innerJoin(schema_1.coordinationCase, (0, drizzle_orm_1.eq)(schema_1.coordinationCase.id, appt.caseId))
+            .where((0, drizzle_orm_1.eq)(schema_1.caseDonor.id, appt.caseDonorId));
+        if (!owner)
+            throw new common_1.NotFoundException({ code: 'APPOINTMENT_NOT_FOUND' });
+        return { ...appt, status: appt.status, ...owner };
     }
     async lockOwned(tx, principal, id) {
         const appt = await this.lock(tx, id);
-        if (appt.donor_user_id !== principal.userId)
+        if (appt.donorProfileId !== (await (0, read_model_public_2.donorProfileIdOf)(tx, principal.userId)))
             throw new common_1.NotFoundException({ code: 'APPOINTMENT_NOT_FOUND' });
         return appt;
     }
     async view(db, id) {
-        const { rows } = await db.query('SELECT id, status, scheduled_start, facility_id, case_id, previous_appointment_id FROM crd.appointment WHERE id = $1', [id]);
-        const r = rows[0];
-        return { id: r.id, caseId: r.case_id, status: r.status, scheduledStart: r.scheduled_start, facilityId: r.facility_id, previousAppointmentId: r.previous_appointment_id };
+        const [r] = await db.orm
+            .select({
+            id: schema_1.appointment.id, caseId: schema_1.appointment.caseId, status: schema_1.appointment.status, scheduledStart: schema_1.appointment.scheduledStart,
+            facilityId: schema_1.appointment.facilityId, previousAppointmentId: schema_1.appointment.previousAppointmentId,
+        })
+            .from(schema_1.appointment)
+            .where((0, drizzle_orm_1.eq)(schema_1.appointment.id, id));
+        return r;
     }
 };
 exports.AppointmentService = AppointmentService;

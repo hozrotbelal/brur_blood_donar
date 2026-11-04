@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.facilityNames = facilityNames;
+exports.isActiveFacility = isActiveFacility;
 const drizzle_orm_1 = require("drizzle-orm");
 const schema_1 = require("./schema");
 async function facilityNames(db, ids) {
@@ -9,5 +10,9 @@ async function facilityNames(db, ids) {
         return new Map();
     const rows = await db.orm.select({ id: schema_1.facility.id, nameEn: schema_1.facility.nameEn, nameBn: schema_1.facility.nameBn }).from(schema_1.facility).where((0, drizzle_orm_1.inArray)(schema_1.facility.id, unique));
     return new Map(rows.map((row) => [row.id, { nameEn: row.nameEn, nameBn: row.nameBn }]));
+}
+async function isActiveFacility(db, id) {
+    const [row] = await db.orm.select({ id: schema_1.facility.id }).from(schema_1.facility).where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.facility.id, id), (0, drizzle_orm_1.eq)(schema_1.facility.status, 'Active')));
+    return row !== undefined;
 }
 //# sourceMappingURL=read-model.public.js.map

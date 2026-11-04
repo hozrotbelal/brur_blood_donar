@@ -1075,6 +1075,35 @@
         ]
       }
     },
+    "/api/v1/admin/staff": {
+      "get": {
+        "operationId": "StaffController_staffList",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/StaffMemberDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "staff-admin"
+        ]
+      }
+    },
     "/api/v1/admin/staff/{userId}/assignment": {
       "post": {
         "operationId": "StaffController_assign",
@@ -1100,7 +1129,215 @@
         },
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssignmentChangedDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "staff-admin"
+        ]
+      }
+    },
+    "/api/v1/admin/staff/{userId}/deactivate": {
+      "post": {
+        "operationId": "StaffController_deactivate",
+        "parameters": [
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StaffReasonDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffDeactivatedDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "staff-admin"
+        ]
+      }
+    },
+    "/api/v1/admin/staff/{userId}/reset-device": {
+      "post": {
+        "operationId": "StaffController_resetDevice",
+        "parameters": [
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StaffReasonDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceResetDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "staff-admin"
+        ]
+      }
+    },
+    "/api/v1/admin/permission-sets": {
+      "get": {
+        "operationId": "StaffController_permissionSets",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PermissionSetViewDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "staff-admin"
+        ]
+      }
+    },
+    "/api/v1/admin/access-review": {
+      "get": {
+        "operationId": "StaffController_accessReview",
+        "parameters": [
+          {
+            "name": "month",
+            "required": false,
+            "in": "query",
+            "description": "Month in Asia/Dhaka time; defaults to the current month",
+            "schema": {
+              "example": "2026-11",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessReviewDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "staff-admin"
+        ]
+      }
+    },
+    "/api/v1/admin/access-review/grants/{grantId}/decision": {
+      "post": {
+        "operationId": "StaffController_decide",
+        "parameters": [
+          {
+            "name": "grantId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GrantDecisionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GrantDecisionResultDto"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -2350,7 +2587,14 @@
         ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaseDetailDto"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -2378,7 +2622,14 @@
         ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaseStateDto"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -2416,7 +2667,14 @@
         },
         "responses": {
           "201": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedIdDto"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -2454,7 +2712,14 @@
         },
         "responses": {
           "201": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedIdDto"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -2492,7 +2757,14 @@
         },
         "responses": {
           "201": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffAppointmentDto"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -2530,7 +2802,14 @@
         },
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffAppointmentDto"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -2558,7 +2837,14 @@
         ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffAppointmentDto"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -2596,7 +2882,14 @@
         },
         "responses": {
           "201": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutcomeRecordedDto"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -2642,7 +2935,14 @@
         },
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DisputeResultDto"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -2688,7 +2988,14 @@
         },
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DisputeResolutionDto"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -2716,7 +3023,14 @@
         ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FulfilmentResultDto"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -2754,7 +3068,14 @@
         },
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestStatusResultDto"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -2792,7 +3113,14 @@
         },
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestStatusResultDto"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -2830,7 +3158,14 @@
         },
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaseStateDto"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -2887,7 +3222,14 @@
         ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffAppointmentDto"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -2953,7 +3295,14 @@
         ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffAppointmentDto"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -4319,6 +4668,65 @@
           "acceptedAt"
         ]
       },
+      "StaffMemberDto": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string",
+            "nullable": true
+          },
+          "phoneLast4": {
+            "type": "string",
+            "description": "Last four digits of the phone number"
+          },
+          "roleCode": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "SUP",
+              "MOD",
+              "ADM"
+            ]
+          },
+          "tierCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "areaIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "Active",
+              "Deactivated",
+              "Locked",
+              "Suspended"
+            ]
+          },
+          "lastLoginAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "userId",
+          "displayName",
+          "phoneLast4",
+          "roleCode",
+          "tierCode",
+          "areaIds",
+          "status",
+          "lastLoginAt"
+        ]
+      },
       "ChangeAssignmentDto": {
         "type": "object",
         "properties": {
@@ -4338,6 +4746,345 @@
         "required": [
           "tierCode",
           "reason"
+        ]
+      },
+      "AssignmentChangedDto": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string"
+          },
+          "tierCode": {
+            "type": "string"
+          },
+          "areaIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "userId",
+          "tierCode",
+          "areaIds"
+        ]
+      },
+      "StaffReasonDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "OpenCaseRefDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "caseNo": {
+            "type": "string"
+          },
+          "requestId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "caseNo",
+          "requestId"
+        ]
+      },
+      "StaffDeactivatedDto": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "Deactivated"
+            ]
+          },
+          "openCases": {
+            "description": "Open cases the person owned; reassign them",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OpenCaseRefDto"
+            }
+          }
+        },
+        "required": [
+          "userId",
+          "status",
+          "openCases"
+        ]
+      },
+      "DeviceResetDto": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string"
+          },
+          "devicesRevoked": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "userId",
+          "devicesRevoked"
+        ]
+      },
+      "PermissionItemDto": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "Own",
+              "Assigned",
+              "Area",
+              "All"
+            ]
+          },
+          "descriptionEn": {
+            "type": "string"
+          },
+          "descriptionBn": {
+            "type": "string"
+          },
+          "sensitive": {
+            "type": "boolean"
+          },
+          "requiresStepUp": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "key",
+          "scope",
+          "descriptionEn",
+          "descriptionBn",
+          "sensitive",
+          "requiresStepUp"
+        ]
+      },
+      "PermissionSetViewDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "nameEn": {
+            "type": "string"
+          },
+          "nameBn": {
+            "type": "string"
+          },
+          "roleCode": {
+            "type": "string",
+            "enum": [
+              "DON",
+              "PAT",
+              "SUP",
+              "MOD",
+              "ADM"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "BASE",
+              "TIER",
+              "SCOPE",
+              "CUSTOM"
+            ]
+          },
+          "tierRank": {
+            "type": "number",
+            "nullable": true
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PermissionItemDto"
+            }
+          }
+        },
+        "required": [
+          "code",
+          "nameEn",
+          "nameBn",
+          "roleCode",
+          "kind",
+          "tierRank",
+          "items"
+        ]
+      },
+      "AccessReviewGrantDto": {
+        "type": "object",
+        "properties": {
+          "grantId": {
+            "type": "string"
+          },
+          "setCode": {
+            "type": "string"
+          },
+          "setNameEn": {
+            "type": "string"
+          },
+          "setNameBn": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "SCOPE",
+              "CUSTOM"
+            ]
+          },
+          "expiresAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "sensitiveKeys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "decision": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "KEEP",
+              "REVOKE"
+            ]
+          },
+          "decidedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "grantId",
+          "setCode",
+          "setNameEn",
+          "setNameBn",
+          "kind",
+          "expiresAt",
+          "sensitiveKeys",
+          "decision",
+          "decidedAt"
+        ]
+      },
+      "AccessReviewMemberDto": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string",
+            "nullable": true
+          },
+          "roleCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "tierCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "reveals": {
+            "type": "number"
+          },
+          "searches": {
+            "type": "number"
+          },
+          "grants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AccessReviewGrantDto"
+            }
+          }
+        },
+        "required": [
+          "userId",
+          "displayName",
+          "roleCode",
+          "tierCode",
+          "reveals",
+          "searches",
+          "grants"
+        ]
+      },
+      "AccessReviewDto": {
+        "type": "object",
+        "properties": {
+          "month": {
+            "type": "string",
+            "example": "2026-11"
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AccessReviewMemberDto"
+            }
+          }
+        },
+        "required": [
+          "month",
+          "members"
+        ]
+      },
+      "GrantDecisionDto": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "KEEP",
+              "REVOKE"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision",
+          "reason"
+        ]
+      },
+      "GrantDecisionResultDto": {
+        "type": "object",
+        "properties": {
+          "grantId": {
+            "type": "string"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "KEEP",
+              "REVOKE"
+            ]
+          }
+        },
+        "required": [
+          "grantId",
+          "decision"
         ]
       },
       "AcceptStaffInvitationDto": {
@@ -5405,6 +6152,318 @@
           "overdue"
         ]
       },
+      "CaseDonorDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "donorCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string"
+          },
+          "joinedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "donorCode",
+          "status",
+          "joinedAt"
+        ]
+      },
+      "CaseAppointmentDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "caseDonorId": {
+            "type": "string"
+          },
+          "facilityId": {
+            "type": "string"
+          },
+          "facility": {
+            "type": "string",
+            "nullable": true
+          },
+          "scheduledStart": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "previousAppointmentId": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "caseDonorId",
+          "facilityId",
+          "facility",
+          "scheduledStart",
+          "status",
+          "previousAppointmentId"
+        ]
+      },
+      "CaseTaskDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "taskType": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "dueAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "assigneeUserId": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "taskType",
+          "status",
+          "dueAt",
+          "assigneeUserId"
+        ]
+      },
+      "CaseNoteViewDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "noteType": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "authorUserId": {
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "noteType",
+          "body",
+          "authorUserId",
+          "createdAt"
+        ]
+      },
+      "CaseContactDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "targetParty": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "result": {
+            "type": "string"
+          },
+          "attemptedBy": {
+            "type": "string"
+          },
+          "attemptedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "targetParty",
+          "channel",
+          "result",
+          "attemptedBy",
+          "attemptedAt"
+        ]
+      },
+      "CaseOutcomeDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "outcomeType": {
+            "type": "string"
+          },
+          "sourceType": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "string",
+            "enum": [
+              "Self-reported",
+              "Service-confirmed"
+            ]
+          },
+          "units": {
+            "type": "number",
+            "nullable": true
+          },
+          "reportedByName": {
+            "type": "string",
+            "nullable": true
+          },
+          "reportedByRole": {
+            "type": "string",
+            "nullable": true
+          },
+          "channel": {
+            "type": "string"
+          },
+          "reportedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "disputed": {
+            "type": "boolean"
+          },
+          "supersedesId": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "outcomeType",
+          "sourceType",
+          "confidence",
+          "units",
+          "reportedByName",
+          "reportedByRole",
+          "channel",
+          "reportedAt",
+          "disputed",
+          "supersedesId"
+        ]
+      },
+      "CaseDetailDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "caseNo": {
+            "type": "string"
+          },
+          "requestId": {
+            "type": "string"
+          },
+          "requestReference": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "string"
+          },
+          "ownerUserId": {
+            "type": "string",
+            "nullable": true
+          },
+          "disputed": {
+            "type": "boolean"
+          },
+          "donors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CaseDonorDto"
+            }
+          },
+          "appointments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CaseAppointmentDto"
+            }
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CaseTaskDto"
+            }
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CaseNoteViewDto"
+            }
+          },
+          "contacts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CaseContactDto"
+            }
+          },
+          "outcomes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CaseOutcomeDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "caseNo",
+          "requestId",
+          "requestReference",
+          "status",
+          "priority",
+          "ownerUserId",
+          "disputed",
+          "donors",
+          "appointments",
+          "tasks",
+          "notes",
+          "contacts",
+          "outcomes"
+        ]
+      },
+      "CaseStateDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status"
+        ]
+      },
       "NoteDto": {
         "type": "object",
         "properties": {
@@ -5423,6 +6482,17 @@
         },
         "required": [
           "body"
+        ]
+      },
+      "CreatedIdDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
         ]
       },
       "ContactAttemptDto": {
@@ -5491,6 +6561,39 @@
           "caseDonorId",
           "facilityId",
           "scheduledStart"
+        ]
+      },
+      "StaffAppointmentDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "caseId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "scheduledStart": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "facilityId": {
+            "type": "string"
+          },
+          "previousAppointmentId": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "caseId",
+          "status",
+          "scheduledStart",
+          "facilityId",
+          "previousAppointmentId"
         ]
       },
       "RescheduleDto": {
@@ -5563,6 +6666,29 @@
           "channel"
         ]
       },
+      "OutcomeRecordedDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "string",
+            "enum": [
+              "Self-reported",
+              "Service-confirmed"
+            ]
+          },
+          "caseStatus": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "confidence",
+          "caseStatus"
+        ]
+      },
       "DisputeOutcomeDto": {
         "type": "object",
         "properties": {
@@ -5572,6 +6698,25 @@
         },
         "required": [
           "reason"
+        ]
+      },
+      "DisputeResultDto": {
+        "type": "object",
+        "properties": {
+          "caseId": {
+            "type": "string"
+          },
+          "outcomeId": {
+            "type": "string"
+          },
+          "disputed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "caseId",
+          "outcomeId",
+          "disputed"
         ]
       },
       "ResolveDisputeDto": {
@@ -5601,6 +6746,57 @@
           "note"
         ]
       },
+      "DisputeResolutionDto": {
+        "type": "object",
+        "properties": {
+          "caseId": {
+            "type": "string"
+          },
+          "outcomeId": {
+            "type": "string"
+          },
+          "resolution": {
+            "type": "string",
+            "enum": [
+              "UPHELD",
+              "CORRECTED"
+            ]
+          },
+          "correctionId": {
+            "type": "string",
+            "nullable": true
+          },
+          "disputed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "caseId",
+          "outcomeId",
+          "resolution",
+          "correctionId",
+          "disputed"
+        ]
+      },
+      "FulfilmentResultDto": {
+        "type": "object",
+        "properties": {
+          "requestStatus": {
+            "type": "string"
+          },
+          "confirmedUnits": {
+            "type": "number"
+          },
+          "requestedUnits": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "requestStatus",
+          "confirmedUnits",
+          "requestedUnits"
+        ]
+      },
       "MoreDonorsDto": {
         "type": "object",
         "properties": {
@@ -5610,6 +6806,17 @@
         },
         "required": [
           "needed"
+        ]
+      },
+      "RequestStatusResultDto": {
+        "type": "object",
+        "properties": {
+          "requestStatus": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "requestStatus"
         ]
       },
       "DeclareUnableDto": {

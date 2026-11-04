@@ -467,6 +467,8 @@ export const userPermissionSet = idnSchema.table('user_permission_set', {
   createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
   version: integer('version').notNull().default(1),
+  lastReviewedAt: timestamp('last_reviewed_at', { withTimezone: true, mode: 'date' }),
+  lastReviewedBy: uuid('last_reviewed_by'),
 });
 
 export const userRole = idnSchema.table('user_role', {

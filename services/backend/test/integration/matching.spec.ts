@@ -97,11 +97,11 @@ suite('matching and invitations (needs TEST_DATABASE_URL with all migrations app
     return { userId, role: 'SUP', grants: await auth.loadGrants(userId, 'SUP') };
   }
 
-  async function verifiedRequest(urgency: 'Routine' | 'Urgent' | 'Critical' = 'Urgent') {
+  async function verifiedRequest(urgency: 'Routine' | 'Urgent' | 'Critical' = 'Urgent', located = true) {
     const area = await db.query<{ id: string }>(
       `INSERT INTO cfg.area (level, code, name_en, name_bn, centroid, is_active)
-       VALUES ('DISTRICT', $1, 'Test', 'পরীক্ষা', ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography, true) RETURNING id`,
-      [`T-${randomUUID()}`, origin.lon, origin.lat],
+       VALUES ('DISTRICT', $1, 'Test', 'পরীক্ষা', CASE WHEN $4 THEN ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography END, true) RETURNING id`,
+      [`T-${randomUUID()}`, origin.lon, origin.lat, located],
     );
     const areaId = area.rows[0].id;
     const patientUser = await newUser('PAT');
@@ -298,6 +298,14 @@ suite('matching and invitations (needs TEST_DATABASE_URL with all migrations app
     await db.query('UPDATE req.blood_request SET outreach_paused = true, outreach_paused_reason = $2, outreach_paused_at = now() WHERE id = $1', [requestId, 'test']);
     await expect(matching.approveWave(agent, waveId, {})).rejects.toMatchObject({ response: { code: 'OUTREACH_PAUSED' } });
     await expect(matching.expandSearch(agent, requestId)).rejects.toMatchObject({ response: { code: 'OUTREACH_PAUSED' } });
+  });
+
+  it('does not let requests without a location hold up the search worker', async () => {
+    for (let i = 0; i < 20; i++) await verifiedRequest('Urgent', false);
+    const { requestId } = await verifiedRequest();
+    await matching.startPendingSearches();
+    const runs = await db.query('SELECT trigger FROM src.match_run WHERE request_id = $1', [requestId]);
+    expect(runs.rows).toEqual([{ trigger: 'AUTO_ON_VERIFIED' }]);
   });
 
   it('starts searches for verified requests found by the worker', async () => {

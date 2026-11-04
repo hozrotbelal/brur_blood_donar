@@ -1,15 +1,23 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
+import { and, count, eq, inArray, notExists, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { DatabaseService, Db } from '../../platform/db/database.service';
 import { Principal } from '../../platform/policy/policy.types';
 import { StatusHistoryService } from '../../platform/status/status-history.service';
-import { findTransition, requestStateMachine, RequestStatus } from '../request/request.public';
+import { cancelOpenInvitations } from '../matching/matching.public';
+import { declareRequestUnable, findTransition, markDonationReported, recordFulfilment, requestState, returnToSearching } from '../request/request.public';
 import { CaseService } from './case.service';
 import { CaseSupport, fail } from './case.support';
 import { DisputeOutcomeDto, RecordOutcomeDto, ResolveDisputeDto } from './case.dto';
+import { caseDonor, coordinationCase, escalation, outcomeUpdate } from './schema';
 
-const COUNTS_TOWARDS_FULFILMENT = ['DONATION_COMPLETED', 'UNITS_RECEIVED_BY_PATIENT_SERVICE'];
+type OutcomeValues = Pick<typeof outcomeUpdate.$inferInsert, 'outcomeType' | 'sourceType' | 'channel'>;
+
+const COUNTS_TOWARDS_FULFILMENT: OutcomeValues['outcomeType'][] = ['DONATION_COMPLETED', 'UNITS_RECEIVED_BY_PATIENT_SERVICE'];
 const SERVICE_SOURCES = ['COLLECTION_SERVICE_CONFIRMATION', 'HOSPITAL_CONFIRMATION'];
+
+const superseding = alias(outcomeUpdate, 'superseding');
+const notSuperseded = (db: Db) => notExists(db.orm.select({ id: superseding.id }).from(superseding).where(eq(superseding.supersedesId, outcomeUpdate.id)));
 
 @Injectable()
 export class OutcomeService {
@@ -22,7 +30,7 @@ export class OutcomeService {
 
   async record(principal: Principal, caseId: string, dto: RecordOutcomeDto) {
     if (dto.channel === 'PHONE' && !dto.reportedByName?.trim()) throw fail('REPORTER_NAME_REQUIRED');
-    if (COUNTS_TOWARDS_FULFILMENT.includes(dto.outcomeType) && dto.units === undefined) throw fail('UNITS_REQUIRED');
+    if (COUNTS_TOWARDS_FULFILMENT.includes(dto.outcomeType as OutcomeValues['outcomeType']) && dto.units === undefined) throw fail('UNITS_REQUIRED');
     const reportedAt = dto.reportedAt ? new Date(dto.reportedAt) : new Date();
     if (reportedAt.getTime() > Date.now() + 60_000) throw fail('REPORTED_IN_FUTURE');
     const confidence = SERVICE_SOURCES.includes(dto.sourceType) ? 'Service-confirmed' : 'Self-reported';
@@ -33,21 +41,27 @@ export class OutcomeService {
       if (row.status !== 'Attendance pending' && row.status !== 'Outcome pending') throw fail('INVALID_TRANSITION');
       let donorProfileId: string | null = null;
       if (dto.caseDonorId) {
-        const own = await tx.query<{ donor_profile_id: string }>('SELECT donor_profile_id FROM crd.case_donor WHERE id = $1 AND case_id = $2', [dto.caseDonorId, caseId]);
-        if (!own.rows[0]) throw fail('CASE_DONOR_NOT_FOUND', 404);
-        donorProfileId = own.rows[0].donor_profile_id;
+        const [own] = await tx.orm
+          .select({ donorProfileId: caseDonor.donorProfileId })
+          .from(caseDonor)
+          .where(and(eq(caseDonor.id, dto.caseDonorId), eq(caseDonor.caseId, caseId)));
+        if (!own) throw fail('CASE_DONOR_NOT_FOUND', 404);
+        donorProfileId = own.donorProfileId;
       }
-      const inserted = await tx.query<{ id: string }>(
-        `INSERT INTO crd.outcome_update (case_id, request_id, case_donor_id, outcome_type, source_type, confidence, reported_by_name, reported_by_role,
-                                         channel, reported_at, recorded_by, units_count, reason_text)
-         VALUES ($1, $2, $3, $4::outcome_type, $5::outcome_source_type, $6::outcome_confidence, $7, $8, $9::report_channel, $10, $11, $12, $13) RETURNING id`,
-        [caseId, row.request_id, dto.caseDonorId ?? null, dto.outcomeType, dto.sourceType, confidence, dto.reportedByName ?? null, dto.reportedByRole ?? null,
-          dto.channel, reportedAt, principal.userId, dto.units ?? null, dto.reason ?? null],
-      );
+      const [inserted] = await tx.orm
+        .insert(outcomeUpdate)
+        .values({
+          caseId, requestId: row.requestId, caseDonorId: dto.caseDonorId ?? null, outcomeType: dto.outcomeType as OutcomeValues['outcomeType'],
+          sourceType: dto.sourceType as OutcomeValues['sourceType'], confidence, reportedByName: dto.reportedByName ?? null, reportedByRole: dto.reportedByRole ?? null,
+          channel: dto.channel as OutcomeValues['channel'], reportedAt, recordedBy: principal.userId, unitsCount: dto.units ?? null, reasonText: dto.reason ?? null,
+        })
+        .returning({ id: outcomeUpdate.id });
       let current = row;
       if (current.status === 'Attendance pending') current = await this.support.moveCase(tx, current, 'Outcome pending', { userId: principal.userId, role: 'SUP' }, 'Outcome recorded');
 
-      if (COUNTS_TOWARDS_FULFILMENT.includes(dto.outcomeType)) await this.markAwaitingOutcome(tx, row.request_id, principal.userId);
+      if (COUNTS_TOWARDS_FULFILMENT.includes(dto.outcomeType as OutcomeValues['outcomeType'])) {
+        await markDonationReported(tx, this.history, row.requestId, { userId: principal.userId, role: 'SUP' }, 'OUTCOME_RECORDED');
+      }
       if (dto.outcomeType === 'DONATION_NOT_COMPLETED' && dto.caseDonorId) {
         await this.cases.handleDonorLeft(tx, { caseDonorId: dto.caseDonorId, kind: 'NOT_COMPLETED', actorUserId: principal.userId, actorRole: 'SUP' });
       }
@@ -57,9 +71,9 @@ export class OutcomeService {
         caseId,
         'OutcomeRecorded',
         {
-          outcomeId: inserted.rows[0].id,
+          outcomeId: inserted.id,
           caseId,
-          requestId: row.request_id,
+          requestId: row.requestId,
           caseDonorId: dto.caseDonorId ?? null,
           donorProfileId,
           outcomeType: dto.outcomeType,
@@ -70,7 +84,7 @@ export class OutcomeService {
         },
         Date.now(),
       );
-      return { id: inserted.rows[0].id, confidence, caseStatus: current.status };
+      return { id: inserted.id, confidence, caseStatus: current.status };
     });
   }
 
@@ -78,49 +92,34 @@ export class OutcomeService {
     return this.db.transaction(async (tx) => {
       const row = await this.support.loadCase(tx, caseId, true);
       await this.support.requireAccess(tx, principal, row, 'case.edit');
-      const request = await tx.query<{ status: RequestStatus; quantity_units: number }>(
-        'SELECT status, quantity_units FROM req.blood_request WHERE id = $1 FOR UPDATE',
-        [row.request_id],
-      );
-      const req = request.rows[0];
+      const req = (await requestState(tx, row.requestId, true))!;
       if (req.status !== 'Awaiting outcome' || row.status !== 'Outcome pending') throw fail('INVALID_TRANSITION');
       if (row.disputed) throw fail('CASE_DISPUTED');
-      const units = await tx.query<{ n: number }>(
-        `SELECT COALESCE(sum(units_count), 0)::int AS n FROM crd.outcome_update o
-          WHERE o.case_id = $1 AND o.confidence = 'Service-confirmed' AND o.outcome_type = ANY($2::outcome_type[]) AND NOT o.is_disputed
-            AND NOT EXISTS (SELECT 1 FROM crd.outcome_update s WHERE s.supersedes_id = o.id)`,
-        [caseId, COUNTS_TOWARDS_FULFILMENT],
-      );
-      const confirmed = Math.min(units.rows[0].n, req.quantity_units);
+      const [units] = await tx.orm
+        .select({ n: sql<number>`COALESCE(sum(${outcomeUpdate.unitsCount}), 0)::int` })
+        .from(outcomeUpdate)
+        .where(and(
+          eq(outcomeUpdate.caseId, caseId), eq(outcomeUpdate.confidence, 'Service-confirmed'), inArray(outcomeUpdate.outcomeType, COUNTS_TOWARDS_FULFILMENT),
+          eq(outcomeUpdate.isDisputed, false), notSuperseded(tx),
+        ));
+      const confirmed = Math.min(units.n, req.quantityUnits);
       if (confirmed === 0) throw fail('FULFILMENT_NEEDS_SERVICE_CONFIRMATION');
 
-      const full = confirmed >= req.quantity_units;
-      const to: RequestStatus = full ? 'Fulfilled' : 'Partially fulfilled';
-      const command = full ? 'record_full_outcome' : 'record_partial_outcome';
-      if (!findTransition('Awaiting outcome', command)) throw fail('INVALID_TRANSITION');
-      await tx.query(
-        `UPDATE req.blood_request SET status = $2::request_status, fulfilled_quantity_units = $3, outcome_confirmed_at = COALESCE(outcome_confirmed_at, now()),
-                fulfilled_at = CASE WHEN $2 = 'Fulfilled' THEN now() ELSE fulfilled_at END, version = version + 1, updated_at = now() WHERE id = $1`,
-        [row.request_id, to, confirmed],
-      );
-      await this.history.record(
-        tx,
-        {
-          entityType: 'BLOOD_REQUEST', entityId: row.request_id, from: 'Awaiting outcome', to, actorUserId: principal.userId, actorRole: 'SUP',
-          source: 'USER', contextRequestId: row.request_id, details: { confirmedUnits: confirmed, requestedUnits: req.quantity_units }, correlationId: randomUUID(),
-        },
-        requestStateMachine,
-      );
-      await tx.query(
-        `UPDATE crd.case_donor SET status = 'Completed', version = version + 1, updated_at = now()
-          WHERE case_id = $1 AND status = 'Active' AND id IN (SELECT case_donor_id FROM crd.outcome_update WHERE case_id = $1 AND outcome_type = 'DONATION_COMPLETED' AND confidence = 'Service-confirmed')`,
-        [caseId],
-      );
+      const full = confirmed >= req.quantityUnits;
+      const to = await recordFulfilment(tx, this.history, row.requestId, confirmed, req.quantityUnits, principal.userId);
+      const completed = tx.orm
+        .select({ id: outcomeUpdate.caseDonorId })
+        .from(outcomeUpdate)
+        .where(and(eq(outcomeUpdate.caseId, caseId), eq(outcomeUpdate.outcomeType, 'DONATION_COMPLETED'), eq(outcomeUpdate.confidence, 'Service-confirmed')));
+      await tx.orm
+        .update(caseDonor)
+        .set({ status: 'Completed', version: sql`${caseDonor.version} + 1`, updatedAt: sql`now()` })
+        .where(and(eq(caseDonor.caseId, caseId), eq(caseDonor.status, 'Active'), inArray(caseDonor.id, completed)));
       await this.support.finishTask(tx, caseId, 'TK_OBTAIN_SOURCED_OUTCOME', principal.userId);
       if (full) await this.support.moveCase(tx, row, 'Resolved', { userId: principal.userId, role: 'SUP' }, 'Fulfilled');
       else await this.support.openTask(tx, row, 'TK_CONFIRM_MORE_DONORS_NEEDED', `more:${caseId}`, 120);
-      await this.support.event(tx, 'BLOOD_REQUEST', row.request_id, full ? 'RequestFulfilled' : 'RequestPartiallyFulfilled', { confirmedUnits: confirmed }, Date.now());
-      return { requestStatus: to, confirmedUnits: confirmed, requestedUnits: req.quantity_units };
+      await this.support.event(tx, 'BLOOD_REQUEST', row.requestId, full ? 'RequestFulfilled' : 'RequestPartiallyFulfilled', { confirmedUnits: confirmed }, Date.now());
+      return { requestStatus: to, confirmedUnits: confirmed, requestedUnits: req.quantityUnits };
     });
   }
 
@@ -128,22 +127,24 @@ export class OutcomeService {
     return this.db.transaction(async (tx) => {
       const row = await this.support.loadCase(tx, caseId, true);
       await this.support.requireAccess(tx, principal, row, 'case.edit');
-      const found = await tx.query<{ is_disputed: boolean }>(
-        `SELECT o.is_disputed FROM crd.outcome_update o
-          WHERE o.id = $1 AND o.case_id = $2 AND NOT EXISTS (SELECT 1 FROM crd.outcome_update s WHERE s.supersedes_id = o.id) FOR UPDATE`,
-        [outcomeId, caseId],
-      );
-      if (!found.rows[0]) throw fail('OUTCOME_NOT_FOUND', 404);
-      if (found.rows[0].is_disputed) throw fail('ALREADY_DISPUTED', 409);
-      await tx.query('UPDATE crd.outcome_update SET is_disputed = true WHERE id = $1', [outcomeId]);
-      await tx.query('UPDATE crd.coordination_case SET disputed = true, version = version + 1, updated_at = now() WHERE id = $1', [caseId]);
-      await tx.query(`INSERT INTO crd.case_note (case_id, author_user_id, note_type, body) VALUES ($1, $2, 'ESCALATION', $3)`, [caseId, principal.userId, dto.reason]);
-      await tx.query(
-        `INSERT INTO crd.escalation (subject_type, subject_id, request_id, case_id, level, reason, status, escalated_to_user_id, dedupe_key)
-         VALUES ('COORDINATION_CASE', $1, $2, $1, 1, 'DISPUTED', 'Open', $3, $4) ON CONFLICT (dedupe_key) DO NOTHING`,
-        [caseId, row.request_id, row.owner_user_id, `dispute:${outcomeId}`],
-      );
-      await this.support.event(tx, 'COORDINATION_CASE', caseId, 'OutcomeDisputed', { outcomeId, caseId, requestId: row.request_id }, Date.now());
+      const [found] = await tx.orm
+        .select({ isDisputed: outcomeUpdate.isDisputed })
+        .from(outcomeUpdate)
+        .where(and(eq(outcomeUpdate.id, outcomeId), eq(outcomeUpdate.caseId, caseId), notSuperseded(tx)))
+        .for('update');
+      if (!found) throw fail('OUTCOME_NOT_FOUND', 404);
+      if (found.isDisputed) throw fail('ALREADY_DISPUTED', 409);
+      await tx.orm.update(outcomeUpdate).set({ isDisputed: true }).where(eq(outcomeUpdate.id, outcomeId));
+      await this.setCaseDisputed(tx, caseId, true);
+      await this.cases.insertNote(tx, caseId, principal.userId, 'ESCALATION', dto.reason);
+      await tx.orm
+        .insert(escalation)
+        .values({
+          subjectType: 'COORDINATION_CASE', subjectId: caseId, requestId: row.requestId, caseId, level: 1, reason: 'DISPUTED', status: 'Open',
+          escalatedToUserId: row.ownerUserId, dedupeKey: `dispute:${outcomeId}`,
+        })
+        .onConflictDoNothing({ target: escalation.dedupeKey });
+      await this.support.event(tx, 'COORDINATION_CASE', caseId, 'OutcomeDisputed', { outcomeId, caseId, requestId: row.requestId }, Date.now());
       return { caseId, outcomeId, disputed: true };
     });
   }
@@ -152,46 +153,46 @@ export class OutcomeService {
     return this.db.transaction(async (tx) => {
       const row = await this.support.loadCase(tx, caseId, true);
       await this.support.requireAccess(tx, principal, row, 'case.edit');
-      const found = await tx.query<{ case_donor_id: string | null; units_count: number | null }>(
-        `SELECT o.case_donor_id, o.units_count FROM crd.outcome_update o
-          WHERE o.id = $1 AND o.case_id = $2 AND o.is_disputed AND NOT EXISTS (SELECT 1 FROM crd.outcome_update s WHERE s.supersedes_id = o.id) FOR UPDATE`,
-        [outcomeId, caseId],
-      );
-      const original = found.rows[0];
+      const [original] = await tx.orm
+        .select({ caseDonorId: outcomeUpdate.caseDonorId, unitsCount: outcomeUpdate.unitsCount })
+        .from(outcomeUpdate)
+        .where(and(eq(outcomeUpdate.id, outcomeId), eq(outcomeUpdate.caseId, caseId), eq(outcomeUpdate.isDisputed, true), notSuperseded(tx)))
+        .for('update');
       if (!original) throw fail('NO_OPEN_DISPUTE', 404);
       let correctionId: string | null = null;
       if (dto.resolution === 'UPHELD') {
-        await tx.query('UPDATE crd.outcome_update SET is_disputed = false WHERE id = $1', [outcomeId]);
+        await tx.orm.update(outcomeUpdate).set({ isDisputed: false }).where(eq(outcomeUpdate.id, outcomeId));
       } else {
         const c = dto.correction;
         if (!c) throw fail('CORRECTION_REQUIRED');
-        if (COUNTS_TOWARDS_FULFILMENT.includes(c.outcomeType) && c.units === undefined) throw fail('UNITS_REQUIRED');
+        if (COUNTS_TOWARDS_FULFILMENT.includes(c.outcomeType as OutcomeValues['outcomeType']) && c.units === undefined) throw fail('UNITS_REQUIRED');
         if (c.channel === 'PHONE' && !c.reportedByName?.trim()) throw fail('REPORTER_NAME_REQUIRED');
         const confidence = SERVICE_SOURCES.includes(c.sourceType) ? 'Service-confirmed' : 'Self-reported';
-        const inserted = await tx.query<{ id: string }>(
-          `INSERT INTO crd.outcome_update (case_id, request_id, case_donor_id, outcome_type, source_type, confidence, reported_by_name, reported_by_role,
-                                           channel, reported_at, recorded_by, units_count, reason_text, supersedes_id)
-           VALUES ($1, $2, $3, $4::outcome_type, $5::outcome_source_type, $6::outcome_confidence, $7, $8, $9::report_channel, now(), $10, $11, $12, $13) RETURNING id`,
-          [caseId, row.request_id, original.case_donor_id, c.outcomeType, c.sourceType, confidence, c.reportedByName ?? null, c.reportedByRole ?? null,
-            c.channel, principal.userId, c.units ?? null, c.reason ?? null, outcomeId],
-        );
-        correctionId = inserted.rows[0].id;
+        const [inserted] = await tx.orm
+          .insert(outcomeUpdate)
+          .values({
+            caseId, requestId: row.requestId, caseDonorId: original.caseDonorId, outcomeType: c.outcomeType as OutcomeValues['outcomeType'],
+            sourceType: c.sourceType as OutcomeValues['sourceType'], confidence, reportedByName: c.reportedByName ?? null, reportedByRole: c.reportedByRole ?? null,
+            channel: c.channel as OutcomeValues['channel'], reportedAt: sql`now()`, recordedBy: principal.userId, unitsCount: c.units ?? null,
+            reasonText: c.reason ?? null, supersedesId: outcomeId,
+          })
+          .returning({ id: outcomeUpdate.id });
+        correctionId = inserted.id;
       }
-      const remaining = await tx.query<{ n: number }>(
-        `SELECT count(*)::int AS n FROM crd.outcome_update o
-          WHERE o.case_id = $1 AND o.is_disputed AND NOT EXISTS (SELECT 1 FROM crd.outcome_update s WHERE s.supersedes_id = o.id)`,
-        [caseId],
-      );
-      const stillDisputed = remaining.rows[0].n > 0;
-      await tx.query('UPDATE crd.coordination_case SET disputed = $2, version = version + 1, updated_at = now() WHERE id = $1', [caseId, stillDisputed]);
-      await tx.query(
-        `UPDATE crd.escalation SET status = 'Resolved', version = version + 1, updated_at = now() WHERE dedupe_key = $1 AND status IN ('Open','Acknowledged')`,
-        [`dispute:${outcomeId}`],
-      );
-      await tx.query(`INSERT INTO crd.case_note (case_id, author_user_id, note_type, body) VALUES ($1, $2, 'GENERAL', $3)`, [caseId, principal.userId, dto.note]);
+      const [remaining] = await tx.orm
+        .select({ n: count() })
+        .from(outcomeUpdate)
+        .where(and(eq(outcomeUpdate.caseId, caseId), eq(outcomeUpdate.isDisputed, true), notSuperseded(tx)));
+      const stillDisputed = remaining.n > 0;
+      await this.setCaseDisputed(tx, caseId, stillDisputed);
+      await tx.orm
+        .update(escalation)
+        .set({ status: 'Resolved', version: sql`${escalation.version} + 1`, updatedAt: sql`now()` })
+        .where(and(eq(escalation.dedupeKey, `dispute:${outcomeId}`), inArray(escalation.status, ['Open', 'Acknowledged'])));
+      await this.cases.insertNote(tx, caseId, principal.userId, 'GENERAL', dto.note);
       await this.support.event(
         tx, 'COORDINATION_CASE', caseId, 'OutcomeDisputeResolved',
-        { outcomeId, caseId, requestId: row.request_id, resolution: dto.resolution, correctionId },
+        { outcomeId, caseId, requestId: row.requestId, resolution: dto.resolution, correctionId },
         Date.now(),
       );
       return { caseId, outcomeId, resolution: dto.resolution, correctionId, disputed: stillDisputed };
@@ -202,19 +203,11 @@ export class OutcomeService {
     return this.db.transaction(async (tx) => {
       const row = await this.support.loadCase(tx, caseId, true);
       await this.support.requireAccess(tx, principal, row, 'case.edit');
-      const request = await tx.query<{ status: RequestStatus }>('SELECT status FROM req.blood_request WHERE id = $1 FOR UPDATE', [row.request_id]);
-      if (request.rows[0].status !== 'Partially fulfilled' || row.status !== 'Outcome pending') throw fail('INVALID_TRANSITION');
+      const request = await requestState(tx, row.requestId, true);
+      if (request?.status !== 'Partially fulfilled' || row.status !== 'Outcome pending') throw fail('INVALID_TRANSITION');
       await this.support.finishTask(tx, caseId, 'TK_CONFIRM_MORE_DONORS_NEEDED', principal.userId);
       if (needed) {
-        await tx.query(`UPDATE req.blood_request SET status = 'Searching', version = version + 1, updated_at = now() WHERE id = $1`, [row.request_id]);
-        await this.history.record(
-          tx,
-          {
-            entityType: 'BLOOD_REQUEST', entityId: row.request_id, from: 'Partially fulfilled', to: 'Searching', actorUserId: principal.userId, actorRole: 'SUP',
-            source: 'USER', contextRequestId: row.request_id, reasonCode: 'MORE_DONORS_NEEDED', correlationId: randomUUID(),
-          },
-          requestStateMachine,
-        );
+        await returnToSearching(tx, this.history, row.requestId, 'Partially fulfilled', { userId: principal.userId, role: 'SUP' }, 'MORE_DONORS_NEEDED');
         await this.support.moveCase(tx, row, 'Open', { userId: principal.userId, role: 'SUP' }, 'More donors needed');
         await this.support.openTask(tx, row, 'TK_OBTAIN_SOURCED_OUTCOME', `outcome-more:${caseId}:${Date.now()}`, 1440);
         return { requestStatus: 'Searching' };
@@ -226,54 +219,26 @@ export class OutcomeService {
 
   async declareUnable(principal: Principal, requestId: string, reason: string) {
     return this.db.transaction(async (tx) => {
-      const found = await tx.query<{ id: string }>('SELECT id FROM crd.coordination_case WHERE request_id = $1', [requestId]);
-      const request = await tx.query<{ status: RequestStatus; assigned_support_user_id: string | null; area_id: string | null }>(
-        'SELECT status, assigned_support_user_id, area_id FROM req.blood_request WHERE id = $1 FOR UPDATE',
-        [requestId],
-      );
-      const req = request.rows[0];
+      const [found] = await tx.orm.select({ id: coordinationCase.id }).from(coordinationCase).where(eq(coordinationCase.requestId, requestId));
+      const req = await requestState(tx, requestId, true);
       if (!req) throw fail('REQUEST_NOT_FOUND', 404);
-      const caseRow = found.rows[0] ? await this.support.loadCase(tx, found.rows[0].id, true) : null;
+      const caseRow = found ? await this.support.loadCase(tx, found.id, true) : null;
       if (caseRow) await this.support.requireAccess(tx, principal, caseRow, 'case.edit');
-      else if (req.assigned_support_user_id !== principal.userId) throw fail('REQUEST_NOT_FOUND', 404);
+      else if (req.assignedSupportUserId !== principal.userId) throw fail('REQUEST_NOT_FOUND', 404);
       if (!findTransition(req.status, 'declare_unable')) throw fail('INVALID_TRANSITION');
 
-      await tx.query(`UPDATE req.blood_request SET status = 'Unable to fulfil', closed_at = now(), version = version + 1, updated_at = now() WHERE id = $1`, [requestId]);
-      await this.history.record(
-        tx,
-        {
-          entityType: 'BLOOD_REQUEST', entityId: requestId, from: req.status, to: 'Unable to fulfil', actorUserId: principal.userId, actorRole: 'SUP',
-          source: 'USER', contextRequestId: requestId, reasonCode: 'UNABLE_TO_FULFIL', reason, correlationId: randomUUID(),
-        },
-        requestStateMachine,
-      );
-      await this.cancelOpenInvitations(tx, requestId);
+      await declareRequestUnable(tx, this.history, requestId, req.status, reason, principal.userId);
+      await cancelOpenInvitations(tx, requestId);
       if (caseRow) await this.cases.reconcileOne(tx, caseRow.id);
       await this.support.event(tx, 'BLOOD_REQUEST', requestId, 'RequestUnableToFulfil', { reason });
       return { requestStatus: 'Unable to fulfil' };
     });
   }
 
-  private async markAwaitingOutcome(tx: Db, requestId: string, userId: string) {
-    const r = await tx.query<{ status: string }>('SELECT status FROM req.blood_request WHERE id = $1 FOR UPDATE', [requestId]);
-    await tx.query('UPDATE req.blood_request SET donation_reported_at = COALESCE(donation_reported_at, now()) WHERE id = $1', [requestId]);
-    if (r.rows[0]?.status !== 'Donor coordination') return;
-    await tx.query(`UPDATE req.blood_request SET status = 'Awaiting outcome', version = version + 1, updated_at = now() WHERE id = $1`, [requestId]);
-    await this.history.record(
-      tx,
-      {
-        entityType: 'BLOOD_REQUEST', entityId: requestId, from: 'Donor coordination', to: 'Awaiting outcome', actorUserId: userId, actorRole: 'SUP',
-        source: 'USER', contextRequestId: requestId, reasonCode: 'OUTCOME_RECORDED', correlationId: randomUUID(),
-      },
-      requestStateMachine,
-    );
-  }
-
-  private cancelOpenInvitations(tx: Db, requestId: string) {
-    return tx.query(
-      `UPDATE src.invitation SET status = 'Cancelled', cancelled_at = now(), cancel_reason = 'REQUEST_CLOSED', version = version + 1, updated_at = now()
-        WHERE request_id = $1 AND status IN ('Queued','Sent','Delivered','Viewed')`,
-      [requestId],
-    );
+  private async setCaseDisputed(tx: Db, caseId: string, disputed: boolean) {
+    await tx.orm
+      .update(coordinationCase)
+      .set({ disputed, version: sql`${coordinationCase.version} + 1`, updatedAt: sql`now()` })
+      .where(eq(coordinationCase.id, caseId));
   }
 }

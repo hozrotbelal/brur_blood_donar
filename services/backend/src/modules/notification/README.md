@@ -13,4 +13,4 @@ The web inbox (`apps/web`, `/notifications`) shows the unread count with "Mark a
 
 ## Data access
 
-Drizzle over the module's `schema.ts` (ADR-16). Identity, request and case data come from those modules' `read-model.public.ts`; the push-token write is identity's `setPushToken`. The two dispatcher loops (`dispatchDue`, `fallbackDue`) stay raw SQL because they use `FOR UPDATE ... SKIP LOCKED`.
+Drizzle over the module's `schema.ts` (ADR-16). Identity, request and case data come from those modules' `read-model.public.ts`; the push-token write is identity's `setPushToken`. The two dispatcher loops (`dispatchDue`, `fallbackDue`) stay raw SQL because they use `FOR UPDATE ... SKIP LOCKED`. `NotificationPlanner` also stays raw SQL: every query in it reads other modules' tables to find recipients and template values (ADR-16 rule 6).

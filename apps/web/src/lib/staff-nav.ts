@@ -34,8 +34,8 @@ export const STAFF_NAV: Record<StaffRole, NavGroup[]> = {
       children: [
         live('nav.sup.queue.all', '/queue'),
         planned('nav.sup.queue.verify'),
-        planned('nav.sup.queue.cases'),
-        planned('nav.sup.queue.outcomes'),
+        live('nav.sup.queue.cases', '/cases'),
+        live('nav.sup.queue.outcomes', '/outcomes'),
         planned('nav.sup.queue.escalations'),
         planned('nav.sup.queue.recovery'),
         planned('nav.sup.queue.audit'),
@@ -136,13 +136,13 @@ export const STAFF_NAV: Record<StaffRole, NavGroup[]> = {
     },
     {
       key: 'nav.adm.team',
-      href: '/team/invitations',
+      href: '/team/staff',
       built: true,
       children: [
-        planned('nav.adm.team.staff'),
+        live('nav.adm.team.staff', '/team/staff'),
         live('nav.adm.team.invitations', '/team/invitations'),
-        planned('nav.adm.team.roles'),
-        planned('nav.adm.team.access'),
+        live('nav.adm.team.roles', '/team/roles'),
+        live('nav.adm.team.access', '/team/access'),
         planned('nav.adm.team.recovery'),
         planned('nav.adm.team.logins'),
       ],

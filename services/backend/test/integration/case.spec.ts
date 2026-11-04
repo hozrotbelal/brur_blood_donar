@@ -171,8 +171,11 @@ suite('coordination cases, appointments and outcomes (needs TEST_DATABASE_URL wi
     const detail = await cases.list(ctx.agent);
     const c = detail.find((x: { requestId: string }) => x.requestId === ctx.requestId)!;
     const full = await cases.detail(ctx.agent, c.id);
+    expect(full.donors[0]).toMatchObject({ donorCode: donor.code, status: 'Active' });
+    expect(full.requestReference).toBe(c.requestReference);
+    expect(full.tasks.map((t) => t.taskType)).toContain('TK_CONFIRM_DONOR_ATTENDANCE');
     const facilityId = await facility(ctx.areaId);
-    return { ...ctx, donor, invitationId: inv.id, caseId: c.id as string, caseDonorId: (full.donors[0] as { id: string }).id, facilityId, waveId };
+    return { ...ctx, donor, invitationId: inv.id, caseId: c.id as string, caseDonorId: full.donors[0].id, facilityId, waveId };
   }
 
   const inHours = (h: number) => new Date(Date.now() + h * 3600_000).toISOString();

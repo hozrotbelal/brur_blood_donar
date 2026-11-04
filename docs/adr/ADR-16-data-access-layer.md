@@ -26,8 +26,9 @@ The project owner asked for an ORM. The repository has had a malware incident, s
 | Identity (auth, sessions, password flows, staff, donor profile, donation projector) | On the ORM |
 | Request (patients, requests, review queue, flags, outreach pause) | On the ORM |
 | Configuration (areas), Appointments (facilities), platform outbox | On the ORM |
-| Notification (enqueue, inbox, delivery report, dispatcher decisions and attempts) | On the ORM; identity, request and case data through their `read-model.public.ts`; the two dispatcher `SKIP LOCKED` loops stay SQL by rule 6 |
-| Matching, Case workflow | SQL through the shared `Db` (lock-heavy, cross-module); backlog item 14 |
+| Notification (enqueue, inbox, delivery report, dispatcher decisions and attempts) | On the ORM; identity, request and case data through their `read-model.public.ts`; the two dispatcher `SKIP LOCKED` loops and the event planner (cross-module recipient reads) stay SQL by rule 6 |
+| Matching (waves, candidates, invitations, responses) | On the ORM; request status changes, batch review tasks and donor last-response go through the owning module's public functions; donor facts (PostGIS), the request lock with location, the request scans and the three invitation `SKIP LOCKED` loops stay SQL by rule 6 |
+| Case workflow (cases, donors, appointments, tasks, notes, contacts, outcomes, disputes) | On the ORM; request status changes go through the request module's public functions and invitation cancellation through matching's; the donor appointment list (PostGIS facility coordinates) and the ended-request scan stay SQL by rule 6 |
 | Platform idempotency, status history, audit writer, partitions, area scope | SQL by rule 6 |
 
 ## Alternatives
